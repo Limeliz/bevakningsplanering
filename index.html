@@ -1,0 +1,1354 @@
+<!doctype html><html lang="sv"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>[hidden]{display:none!important}body{margin:0}</style></head><body>
+<title>Vaktplan</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Source+Sans+3:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: mörk sidopanel som kontrollrum + ljus arbetsyta; schemat är ett tidrutnät med statusfärgade passbrickor. */
+:root{
+  --bg:#e9edf2; --surface:#ffffff; --surface-2:#f4f6f9; --ink:#14202c; --muted:#5a6677; --line:#d3d9e1; --line-strong:#aab4c0;
+  --side:#132030; --side-ink:#c4d0dd; --side-muted:#7f8fa1; --side-hover:#1d2f43;
+  --accent:#f0b429; --accent-ink:#5a3f00; --accent-soft:#fcefcf;
+  --ok:#1f7146; --ok-soft:#dff1e6; --warn:#985a00; --warn-soft:#fbebcf; --err:#b42318; --err-soft:#fbe2de; --info:#225694; --info-soft:#e0eaf7;
+  --weekend:#eef1f6; --holiday:#fbe9e4;
+  --font-head:'Barlow Semi Condensed','Arial Narrow',system-ui,sans-serif;
+  --font-body:'Source Sans 3',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+  --radius:6px; --shadow:0 10px 40px rgba(10,20,35,.25);
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0e141b; --surface:#16202b; --surface-2:#1c2835; --ink:#e3e9ef; --muted:#95a3b3; --line:#2a3746; --line-strong:#41516380;
+  --side:#0a1017; --side-ink:#c4d0dd; --side-muted:#738497; --side-hover:#152230;
+  --accent:#f2b938; --accent-ink:#f6cf6f; --accent-soft:#3a2e10;
+  --ok:#5cc58b; --ok-soft:#173225; --warn:#f0a94a; --warn-soft:#3a2a12; --err:#f28b7f; --err-soft:#3d1a17; --info:#7fb0ec; --info-soft:#172b44;
+  --weekend:#131c26; --holiday:#2c1a18; --shadow:0 10px 40px rgba(0,0,0,.6); color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#0e141b; --surface:#16202b; --surface-2:#1c2835; --ink:#e3e9ef; --muted:#95a3b3; --line:#2a3746; --line-strong:#41516380;
+  --side:#0a1017; --side-ink:#c4d0dd; --side-muted:#738497; --side-hover:#152230;
+  --accent:#f2b938; --accent-ink:#f6cf6f; --accent-soft:#3a2e10;
+  --ok:#5cc58b; --ok-soft:#173225; --warn:#f0a94a; --warn-soft:#3a2a12; --err:#f28b7f; --err-soft:#3d1a17; --info:#7fb0ec; --info-soft:#172b44;
+  --weekend:#131c26; --holiday:#2c1a18; --shadow:0 10px 40px rgba(0,0,0,.6); color-scheme:dark }
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:15px;line-height:1.45}
+h1,h2,h3{font-family:var(--font-head);font-weight:700;letter-spacing:.01em;text-wrap:balance;margin:0}
+h1{font-size:28px} h2{font-size:21px} h3{font-size:17px}
+button,input,select,textarea{font:inherit;color:inherit}
+.num,td.n,th.n{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--font-mono);font-size:.86em}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.app{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100%}
+.side{background:var(--side);color:var(--side-ink);padding-block:18px;padding-left:max(14px,env(safe-area-inset-left,0px));padding-right:14px;display:flex;flex-direction:column;gap:18px;position:sticky;top:0;height:100vh;overflow:auto}
+.brand{display:flex;align-items:center;gap:10px;padding:0 6px}
+.brand-mark{width:30px;height:30px;border-radius:5px;background:var(--accent);display:grid;place-items:center;color:#1a1300;font-family:var(--font-head);font-weight:700;font-size:17px}
+.brand b{font-family:var(--font-head);font-size:21px;color:#fff;letter-spacing:.02em}
+.brand small{display:block;color:var(--side-muted);font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+.who{display:grid;gap:4px;padding:0 6px}
+.who label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--side-muted)}
+.who select{background:var(--side-hover);border:1px solid #2b3d52;color:#fff;border-radius:var(--radius);padding:7px 8px;width:100%}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav button{all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:var(--radius);color:var(--side-ink);font-weight:600}
+.nav button:hover{background:var(--side-hover)}
+.nav button[aria-current="page"]{background:var(--side-hover);color:#fff;box-shadow:inset 3px 0 0 var(--accent)}
+.nav button:focus-visible{outline:2px solid var(--accent)}
+.nav .count{font-size:12px;background:var(--err);color:#fff;border-radius:10px;padding:0 7px;font-variant-numeric:tabular-nums}
+.nav .count.amber{background:var(--accent);color:#1a1300}
+.side-foot{margin-top:auto;font-size:12px;color:var(--side-muted);padding:0 6px}
+
+.main{min-width:0;padding-block:22px 60px;padding-left:max(16px,2.2vw);padding-right:max(16px,env(safe-area-inset-right,0px),2.2vw)}
+.page-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:18px}
+.page-head p{margin:4px 0 0;color:var(--muted);max-width:70ch}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.eyebrow{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700}
+
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line-strong);background:var(--surface);border-radius:var(--radius);padding:6px 12px;cursor:pointer;font-weight:600;font-size:14px;white-space:nowrap}
+.btn:hover{border-color:var(--ink)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#1a1300}
+.btn.primary:hover{filter:brightness(.95)}
+.btn.danger{color:var(--err);border-color:var(--err)}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn.sm{padding:3px 8px;font-size:13px}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.seg{display:inline-flex;border:1px solid var(--line-strong);border-radius:var(--radius);overflow:hidden}
+.seg button{border:0;background:var(--surface);padding:6px 11px;cursor:pointer;font-weight:600;font-size:14px}
+.seg button+button{border-left:1px solid var(--line-strong)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius)}
+.panel-h{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.panel-b{padding:14px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
+.stack{display:grid;gap:16px}
+
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;display:grid;gap:2px}
+.kpi .v{font-family:var(--font-head);font-size:32px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.kpi .l{color:var(--muted);font-size:13px}
+.kpi.err .v{color:var(--err)} .kpi.amber .v{color:var(--warn)}
+
+.tbl-wrap{overflow-x:auto}
+table.tbl{border-collapse:collapse;width:100%;font-size:14px}
+.tbl th{text-align:left;font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--surface-2)}
+.tbl td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+.tbl td.n,.tbl th.n{text-align:right;white-space:nowrap}
+.tbl tr.total td{font-weight:700;border-top:2px solid var(--line-strong)}
+.tbl tr.click{cursor:pointer} .tbl tr.click:hover td{background:var(--surface-2)}
+.muted{color:var(--muted)} .small{font-size:13px}
+
+.pill{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:700;padding:1px 8px;border-radius:999px;white-space:nowrap;background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+.pill.ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}
+.pill.warn{background:var(--warn-soft);color:var(--warn);border-color:transparent}
+.pill.err{background:var(--err-soft);color:var(--err);border-color:transparent}
+.pill.info{background:var(--info-soft);color:var(--info);border-color:transparent}
+.pill.amber{background:var(--accent-soft);color:var(--accent-ink);border-color:transparent}
+
+/* Schemarutnät */
+.sched{border-collapse:separate;border-spacing:0;font-size:13px;min-width:100%}
+.sched th,.sched td{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:4px;vertical-align:top}
+.sched thead th{position:sticky;top:0;background:var(--surface-2);z-index:2;font-weight:700;text-align:left;white-space:nowrap;padding:6px}
+.sched thead th .d{font-family:var(--font-head);font-size:15px}
+.sched thead th .h{display:block;font-size:11px;color:var(--err);font-weight:600;white-space:normal;max-width:110px}
+.sched .rowh{text-align:left;position:sticky;left:0;background:var(--surface);z-index:1;min-width:190px;max-width:220px}
+.sched thead .rowh{z-index:3;background:var(--surface-2)}
+.sched .rowh b{display:block;font-size:14px}
+.sched .rowh span{color:var(--muted);font-size:12px}
+.sched td{min-width:104px;background:var(--surface)}
+.sched td.we{background:var(--weekend)} .sched td.hol{background:var(--holiday)}
+.sched td.today,.sched th.today{box-shadow:inset 0 3px 0 var(--accent)}
+.sched tr.site td,.sched tr.site th{background:var(--surface-2);font-family:var(--font-head);font-size:15px;font-weight:700;letter-spacing:.02em;padding:6px 8px}
+.sched td.wkstart,.sched th.wkstart{border-left:2px solid var(--line-strong)}
+.chip{display:block;width:100%;text-align:left;border-radius:4px;padding:3px 6px;margin:0 0 3px;cursor:pointer;border:1px solid transparent;background:var(--surface-2);font-size:12.5px;line-height:1.25}
+.chip:hover{border-color:var(--ink)}
+.chip .t{display:block;font-family:var(--font-mono);font-size:11px;color:var(--muted)}
+.chip.ordinary{background:var(--surface-2);border-color:var(--line)}
+.chip.reassigned,.chip.extra{background:var(--info-soft);color:var(--info)}
+.chip.vacant{background:var(--err-soft);color:var(--err);border:1px dashed var(--err);font-weight:700}
+.chip.open{background:var(--accent-soft);color:var(--accent-ink);border:1px dashed var(--warn);font-weight:700}
+.chip.cancelled{background:transparent;color:var(--muted);text-decoration:line-through;border:1px dashed var(--line)}
+.chip .flag{float:right;font-weight:700;font-size:11px;padding:0 4px;border-radius:3px;margin-left:4px}
+.chip .flag.err{background:var(--err);color:#fff} .chip .flag.warn{background:var(--warn);color:#fff}
+.legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--muted);margin:10px 0 0}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.legend i{display:inline-block;width:14px;height:10px;border-radius:2px}
+
+/* Listor */
+.list{display:grid}
+.item{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--line)}
+.item:last-child{border-bottom:0}
+.item .main-t{min-width:0;flex:1 1 260px}
+.item .main-t b{font-weight:700}
+.item .meta{color:var(--muted);font-size:13px}
+.issue{display:flex;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);align-items:flex-start}
+.issue:last-child{border-bottom:0}
+.issue .msg{flex:1;min-width:0}
+.issues-box{display:grid;gap:6px;margin:8px 0}
+.issues-box .row{padding:7px 10px;border-radius:var(--radius);font-size:13.5px}
+.issues-box .row.err{background:var(--err-soft);color:var(--err)}
+.issues-box .row.warn{background:var(--warn-soft);color:var(--warn)}
+.issues-box .row.ok{background:var(--ok-soft);color:var(--ok)}
+.empty{padding:26px 14px;text-align:center;color:var(--muted)}
+
+/* Formulär */
+.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px 14px}
+.field{display:grid;gap:4px;min-width:0}
+.field.full{grid-column:1/-1}
+.field label,.lbl{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.field input,.field select,.field textarea,.inp{border:1px solid var(--line-strong);background:var(--surface);border-radius:var(--radius);padding:7px 9px;width:100%;min-width:0}
+.field .hint{font-size:12.5px;color:var(--muted)}
+.checks{display:flex;flex-wrap:wrap;gap:6px 14px}
+.checks label{display:inline-flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink);font-weight:400}
+.matrix{border-collapse:collapse;font-size:13px}
+.matrix th,.matrix td{padding:4px 6px;text-align:center;border-bottom:1px solid var(--line)}
+.matrix th:first-child,.matrix td:first-child{text-align:left;white-space:nowrap}
+.matrix input{width:18px;height:18px}
+.presets{display:flex;flex-wrap:wrap;gap:6px}
+.note{font-size:13px;color:var(--muted);background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius);padding:9px 11px}
+.inline-confirm{background:var(--err-soft);border:1px solid var(--err);border-radius:var(--radius);padding:10px 12px;display:grid;gap:8px}
+
+/* Modal */
+#modal{position:fixed;inset:0;z-index:50;display:grid;place-items:center;padding:max(12px,env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) max(12px,env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px))}
+#modal .scrim{position:absolute;inset:0;background:rgba(8,14,22,.55)}
+#modal .dialog{position:relative;background:var(--surface);border-radius:8px;box-shadow:var(--shadow);width:min(760px,100%);max-height:calc(100vh - 24px);overflow:auto;border:1px solid var(--line)}
+#modal .dialog.wide{width:min(980px,100%)}
+.dlg-h{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:16px 18px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--surface);z-index:1}
+.dlg-b{padding:16px 18px;display:grid;gap:16px}
+.dlg-f{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;padding:12px 18px;border-top:1px solid var(--line)}
+.sect{display:grid;gap:8px}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;font-size:14px}
+.kv dt{color:var(--muted)} .kv dd{margin:0}
+
+#toast{position:fixed;left:50%;bottom:max(18px,env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--surface);padding:9px 16px;border-radius:var(--radius);font-weight:600;z-index:60;box-shadow:var(--shadow);max-width:calc(100% - 32px)}
+
+@media (max-width:860px){
+  .app{grid-template-columns:minmax(0,1fr)}
+  .side{position:static;height:auto;flex-direction:column;gap:10px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:12px}
+  .nav{flex-direction:row;overflow-x:auto;gap:4px;padding-bottom:4px}
+  .nav button{white-space:nowrap;padding:6px 10px}
+  .nav button[aria-current="page"]{box-shadow:inset 0 -3px 0 var(--accent)}
+  .side-foot{display:none}
+  .main{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+  h1{font-size:24px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="app" id="app"></div>
+<div id="modal" hidden><div class="scrim" data-act="closeModal"></div><div class="dialog" id="dialog" role="dialog" aria-modal="true"></div></div>
+<div id="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+'use strict';
+/* =========================================================
+   Konstanter & hjälpfunktioner
+   ========================================================= */
+const WD = ['Mån','Tis','Ons','Tor','Fre','Lör','Sön'];
+const WD_LONG = ['måndag','tisdag','onsdag','torsdag','fredag','lördag','söndag'];
+const MONTHS = ['januari','februari','mars','april','maj','juni','juli','augusti','september','oktober','november','december'];
+const STORE_KEY = 'vaktplan.data.v1';
+const UI_KEY = 'vaktplan.ui.v1';
+
+const FORMS = {
+  tv:      {name:'Tillsvidareanställning', pay:'month', needsEnd:false},
+  prov:    {name:'Provanställning', pay:'month', needsEnd:true, maxMonths:6},
+  sv:      {name:'Särskild visstidsanställning', pay:'month', needsEnd:true},
+  vikariat:{name:'Vikariat', pay:'month', needsEnd:true},
+  sasong:  {name:'Säsongsanställning', pay:'month', needsEnd:true},
+  behov:   {name:'Behovsanställning (timavlönad)', pay:'hour', needsEnd:false},
+};
+const CERTS = {vaktare:'Väktare', skyddsvakt:'Skyddsvakt', ordningsvakt:'Ordningsvakt'};
+const ABS = {sjuk:'Sjuk', semester:'Semester', tjl:'Tjänstledig', vab:'VAB / föräldraledig', utb:'Utbildning', ovrigt:'Övrigt / omplanerat'};
+const OBCATS = {kvall:'Kväll (mån–fre 18–22)', natt:'Natt (22–06)', helg:'Helg (lör–sön, helgdag)', storhelg:'Storhelg'};
+
+const pad = n => String(n).padStart(2,'0');
+const iso = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const parseISO = s => { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); };
+const addDays = (d,n) => { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate()+n); return x; };
+const wdIdx = d => (d.getDay()+6)%7;
+const mondayOf = d => addDays(d, -wdIdx(d));
+const dayDiff = (a,b) => Math.round((parseISO(iso(b)) - parseISO(iso(a))) / 864e5);
+const tmin = t => { const [h,m] = String(t).split(':').map(Number); return (h||0)*60 + (m||0); };
+const at = (ds, t) => { const d = parseISO(ds); d.setHours(0, tmin(t), 0, 0); return d; };
+const today0 = () => parseISO(iso(new Date()));
+function isoWeek(d){ const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); const day = t.getUTCDay()||7; t.setUTCDate(t.getUTCDate()+4-day); const y0 = new Date(Date.UTC(t.getUTCFullYear(),0,1)); return Math.ceil(((t-y0)/864e5+1)/7); }
+const fmtD = d => `${d.getDate()}/${d.getMonth()+1}`;
+const fmtT = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const fmtLong = d => `${WD_LONG[wdIdx(d)]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+const kr = n => (Math.round(n*100)/100).toLocaleString('sv-SE',{minimumFractionDigits:2, maximumFractionDigits:2}) + ' kr';
+const num = (n,dec=2) => (Math.round(n*100)/100).toLocaleString('sv-SE',{minimumFractionDigits:0, maximumFractionDigits:dec});
+const hrs = n => num(n,2);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = p => (p||'') + Math.random().toString(36).slice(2,9);
+const r2 = n => Math.round(n*100)/100;
+
+/* Svenska helgdagar */
+function easter(y){ const a=y%19,b=Math.floor(y/100),c=y%100,d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30,i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451),mo=Math.floor((h+l-7*m+114)/31),da=((h+l-7*m+114)%31)+1; return new Date(y,mo-1,da); }
+const holCache = {};
+function holidays(y){
+  if (holCache[y]) return holCache[y];
+  const e = easter(y), H = {};
+  const add = (d,name,st) => H[iso(d)] = {name, storhelg:!!st};
+  add(new Date(y,0,1),'Nyårsdagen',1); add(new Date(y,0,6),'Trettondedag jul');
+  add(addDays(e,-2),'Långfredagen',1); add(addDays(e,-1),'Påskafton',1); add(e,'Påskdagen',1); add(addDays(e,1),'Annandag påsk',1);
+  add(new Date(y,4,1),'Första maj'); add(addDays(e,39),'Kristi himmelsfärdsdag'); add(addDays(e,49),'Pingstdagen'); add(new Date(y,5,6),'Nationaldagen');
+  for (let d=19; d<=25; d++){ const x = new Date(y,5,d); if (x.getDay()===5){ add(x,'Midsommarafton',1); add(addDays(x,1),'Midsommardagen',1); } }
+  for (let d=31; d<=37; d++){ const x = new Date(y,9,d); if (x.getDay()===6) add(x,'Alla helgons dag'); }
+  add(new Date(y,11,24),'Julafton',1); add(new Date(y,11,25),'Juldagen',1); add(new Date(y,11,26),'Annandag jul',1); add(new Date(y,11,31),'Nyårsafton',1);
+  return holCache[y] = H;
+}
+const holiday = d => holidays(d.getFullYear())[iso(d)];
+
+/* =========================================================
+   Data & lagring
+   ========================================================= */
+let D = null;      // all data
+let VER = 0;       // ändringsräknare för memo
+const UI = { user:null, view:null, schedStart:null, schedWeeks:2, schedMode:'pass', payMonth:null, ruleWeeks:4, bookCheck:null, draft:null, pendingForce:null, confirm:null, myMonth:null };
+
+function store(){ try { return window.localStorage; } catch(e){ return null; } }
+function save(){ VER++; const s = store(); if (!s) return; try { s.setItem(STORE_KEY, JSON.stringify(D)); } catch(e){} }
+function saveUI(){ const s = store(); if (!s) return; try { s.setItem(UI_KEY, JSON.stringify({user:UI.user, view:UI.view, schedWeeks:UI.schedWeeks, schedMode:UI.schedMode})); } catch(e){} }
+function load(){
+  const s = store(); let raw = null;
+  try { raw = s && s.getItem(STORE_KEY); } catch(e){}
+  if (raw){ try { D = JSON.parse(raw); } catch(e){ D = null; } }
+  if (!D || !D.employees || !D.series) { D = seed(); save(); }
+  try { const u = s && JSON.parse(s.getItem(UI_KEY)||'null'); if (u) Object.assign(UI, u); } catch(e){}
+}
+
+function defaultSettings(){
+  return {
+    lonegrupper: [
+      {id:'G1', name:'Väktare, 0–12 mån', salary:28400},
+      {id:'G2', name:'Väktare, 1–3 år', salary:29250},
+      {id:'G3', name:'Väktare, över 3 år', salary:30100},
+      {id:'G4', name:'Ordnings-/skyddsvakt', salary:31300},
+      {id:'G5', name:'Arbetsledare', salary:35500},
+    ],
+    ob: {kvall:24.60, natt:49.20, helg:61.50, storhelg:123.00},
+    atf: {kvall:0, natt:6, helg:3, storhelg:6},
+    atfMode: 'saldo',
+    divisor: 174, otEnkel: 94, otKval: 72, semErs: 12,
+    sickPct: 80, karensPct: 20,
+    rules: {maxShift:12, minDailyRest:11, minWeeklyRest:36, maxAvgWeek:48, avgWeeks:4, maxOtMonth:50},
+  };
+}
+
+function seed(){
+  const T = today0();
+  const anchor = mondayOf(new Date(T.getFullYear(), T.getMonth()-1, 1));
+  const A = iso(anchor);
+  const plusM = (n) => { const d = new Date(T.getFullYear(), T.getMonth()+n, T.getDate()); return iso(d); };
+  const fatEnd = iso(addDays(new Date(anchor.getFullYear(), anchor.getMonth()+6, anchor.getDate()), -1));
+  const data = {
+    version: 1,
+    settings: defaultSettings(),
+    sites: [
+      {id:'s1', name:'Hamnterminalen', address:'Kajvägen 4'},
+      {id:'s2', name:'Kontorshuset Norr', address:'Norra Allén 12'},
+      {id:'s3', name:'Centrum, rondering', address:'Stortorget'},
+      {id:'s4', name:'Arenan', address:'Arenavägen 1'},
+    ],
+    employees: [
+      {id:'e1', name:'Anna Lindqvist', role:'arbetsledare', form:'tv', grad:100, lg:'G5', certs:['vaktare','ordningsvakt'], start:'2015-03-01', end:'', phone:'070-555 01 01', email:'anna.lindqvist@exempel.se'},
+      {id:'e2', name:'Johan Ek', role:'personal', form:'tv', grad:100, lg:'G3', certs:['vaktare'], start:'2018-09-01', end:'', phone:'070-555 01 02', email:'johan.ek@exempel.se'},
+      {id:'e3', name:'Sara Nilsson', role:'personal', form:'tv', grad:100, lg:'G2', certs:['vaktare'], start:'2023-02-01', end:'', phone:'070-555 01 03', email:'sara.nilsson@exempel.se'},
+      {id:'e4', name:'Mehmet Yilmaz', role:'personal', form:'tv', grad:100, lg:'G4', certs:['vaktare','skyddsvakt'], start:'2016-05-15', end:'', phone:'070-555 01 04', email:'mehmet.yilmaz@exempel.se'},
+      {id:'e5', name:'Lina Karlsson', role:'personal', form:'tv', grad:40, lg:'G4', certs:['vaktare','ordningsvakt'], start:'2020-01-01', end:'', phone:'070-555 01 05', email:'lina.karlsson@exempel.se'},
+      {id:'e6', name:'Erik Johansson', role:'personal', form:'behov', grad:0, lg:'G1', certs:['vaktare'], start:'2025-06-01', end:'', phone:'070-555 01 06', email:'erik.johansson@exempel.se'},
+      {id:'e7', name:'Fatima Hassan', role:'personal', form:'prov', grad:100, lg:'G1', certs:['vaktare'], start:A, end:fatEnd, phone:'070-555 01 07', email:'fatima.hassan@exempel.se'},
+      {id:'e8', name:'Oskar Berg', role:'personal', form:'behov', grad:0, lg:'G2', certs:['vaktare','ordningsvakt'], start:'2024-04-01', end:'', phone:'070-555 01 08', email:'oskar.berg@exempel.se'},
+      {id:'e9', name:'Maja Holm', role:'personal', form:'vikariat', grad:100, lg:'G2', certs:['vaktare'], start:A, end:plusM(5), phone:'070-555 01 09', email:'maja.holm@exempel.se'},
+      {id:'e10', name:'Ali Rahimi', role:'personal', form:'sv', grad:40, lg:'G1', certs:['vaktare','ordningsvakt'], start:A, end:plusM(4), phone:'070-555 01 10', email:'ali.rahimi@exempel.se'},
+    ],
+    series: [
+      {id:'n1', name:'Natt A', siteId:'s1', from:'18:00', to:'06:00', breakMin:0, cycle:2, days:[[0,1,4,5,6],[2,3]], start:A, end:'', personId:'e2', requires:'vaktare'},
+      {id:'n2', name:'Natt B', siteId:'s1', from:'18:00', to:'06:00', breakMin:0, cycle:2, days:[[2,3],[0,1,4,5,6]], start:A, end:'', personId:'e3', requires:'vaktare'},
+      {id:'d1', name:'Dag A', siteId:'s1', from:'06:00', to:'18:00', breakMin:0, cycle:2, days:[[0,1,4,5,6],[2,3]], start:A, end:'', personId:'e4', requires:'vaktare'},
+      {id:'d2', name:'Dag B', siteId:'s1', from:'06:00', to:'18:00', breakMin:0, cycle:2, days:[[2,3],[0,1,4,5,6]], start:A, end:'', personId:'e7', requires:'vaktare'},
+      {id:'r1', name:'Reception', siteId:'s2', from:'08:00', to:'17:00', breakMin:60, cycle:1, days:[[0,1,2,3,4]], start:A, end:'', personId:'e9', requires:'vaktare'},
+      {id:'k1', name:'Kvällsrond helg', siteId:'s3', from:'17:00', to:'01:00', breakMin:0, cycle:1, days:[[4,5]], start:A, end:'', personId:'e5', requires:'vaktare'},
+      {id:'k2', name:'Kvällsrond vardag', siteId:'s3', from:'17:00', to:'01:00', breakMin:0, cycle:2, days:[[0,1],[2,3]], start:A, end:'', personId:'e10', requires:'vaktare'},
+    ],
+    singles: [],
+    overrides: {},
+  };
+  // Demo-händelser relativt dagens datum
+  D = data;
+  const S = id => data.series.find(s => s.id===id);
+  const nth = (s, from, n) => { let d = new Date(from), c = 0; for (let i=0;i<150;i++){ if (seriesOccursOn(s,d)){ if (c===n) return iso(d); c++; } d = addDays(d,1); } return null; };
+  // 1) Erik täcker Johans natt och Mehmets dag direkt efter -> dygnsvilebrott (avsiktligt exempel)
+  let d = addDays(T,3);
+  for (let i=0;i<40;i++){ if (seriesOccursOn(S('n1'),d) && seriesOccursOn(S('d1'),addDays(d,1))) break; d = addDays(d,1); }
+  data.overrides['n1@'+iso(d)] = {personId:'e6', absence:'sjuk'};
+  data.overrides['d1@'+iso(addDays(d,1))] = {personId:'e6', absence:'utb'};
+  const nx = nth(S('n1'), addDays(d,2), 0); if (nx) data.overrides['n1@'+nx] = {personId:null, absence:'sjuk'};
+  // 2) Fatima semester -> två fria pass
+  const f1 = nth(S('d2'), addDays(T,2), 0), f2 = nth(S('d2'), addDays(T,2), 1);
+  if (f1) data.overrides['d2@'+f1] = {personId:null, open:true, absence:'semester'};
+  if (f2) data.overrides['d2@'+f2] = {personId:null, open:true, absence:'semester'};
+  // 3) Lina tjänstledig -> vakant
+  const l1 = nth(S('k1'), addDays(T,6), 0); if (l1) data.overrides['k1@'+l1] = {personId:null, absence:'tjl'};
+  // 4) Innevarande månad: ommöbleringar som syns i lönen
+  const M = new Date(T.getFullYear(), T.getMonth(), 1);
+  const s1 = nth(S('n2'), addDays(M,3), 0); if (s1) data.overrides['n2@'+s1] = {personId:'e8', absence:'sjuk'};
+  const s2 = nth(S('n2'), addDays(M,3), 1); if (s2) data.overrides['n2@'+s2] = {personId:'e6', absence:'sjuk'};
+  const s3 = nth(S('k1'), addDays(M,1), 0); if (s3) data.overrides['k1@'+s3] = {personId:'e8', absence:'tjl'};
+  const s4 = nth(S('r1'), addDays(M,8), 0); if (s4) data.overrides['r1@'+s4] = {personId:'e6', absence:'semester'};
+  const s5 = nth(S('d1'), addDays(M,10), 0); if (s5) data.overrides['d1@'+s5] = {personId:'e3', absence:'utb'};
+  // 5) Extrapass på Arenan och förstärkning
+  const sat = d0 => { let x = new Date(d0); while (wdIdx(x)!==5) x = addDays(x,1); return x; };
+  const nextSat = sat(addDays(T,1));
+  data.singles.push({id:'x1', date:iso(nextSat), from:'16:00', to:'23:00', siteId:'s4', name:'Arena: match', personId:'e10', open:false, cancelled:false, breakMin:0, requires:'ordningsvakt'});
+  data.singles.push({id:'x2', date:iso(nextSat), from:'16:00', to:'23:00', siteId:'s4', name:'Arena: match', personId:null, open:true, cancelled:false, breakMin:0, requires:'ordningsvakt'});
+  data.singles.push({id:'x3', date:iso(nextSat), from:'16:00', to:'23:00', siteId:'s4', name:'Arena: match', personId:null, open:true, cancelled:false, breakMin:0, requires:'ordningsvakt'});
+  const pastSat = sat(addDays(M,0));
+  data.singles.push({id:'x4', date:iso(pastSat), from:'15:00', to:'23:00', siteId:'s4', name:'Arena: konsert', personId:'e8', open:false, cancelled:false, breakMin:0, requires:'ordningsvakt'});
+  data.singles.push({id:'x5', date:iso(pastSat), from:'15:00', to:'23:00', siteId:'s4', name:'Arena: konsert', personId:'e3', open:false, cancelled:false, breakMin:0, requires:'ordningsvakt'});
+  let wed = addDays(T,1); while (wdIdx(wed)!==2) wed = addDays(wed,1);
+  data.singles.push({id:'x6', date:iso(wed), from:'22:00', to:'06:00', siteId:'s1', name:'Förstärkning fartygsanlöp', personId:null, open:false, cancelled:false, breakMin:0, requires:'vaktare'});
+  return data;
+}
+
+/* =========================================================
+   Pass: generering
+   ========================================================= */
+const empById = id => D.employees.find(e => e.id===id);
+const siteById = id => D.sites.find(s => s.id===id);
+const seriesById = id => D.series.find(s => s.id===id);
+const lgOf = e => D.settings.lonegrupper.find(g => g.id===e.lg);
+const firstName = id => { const e = empById(id); return e ? e.name.split(' ')[0] : '?'; };
+const empName = id => { const e = empById(id); return e ? e.name : '–'; };
+
+function seriesOccursOn(s, d){
+  const ds = iso(d);
+  if (!s.start || ds < s.start) return false;
+  if (s.end && ds > s.end) return false;
+  const anchor = mondayOf(parseISO(s.start));
+  const w = Math.floor(dayDiff(anchor, d) / 7);
+  const cyc = Math.max(1, s.cycle|0);
+  const idx = ((w % cyc) + cyc) % cyc;
+  return (s.days[idx] || []).includes(wdIdx(d));
+}
+function shiftTimes(ds, from, to){ const start = at(ds, from); let end = at(ds, to); if (end <= start) end = at(iso(addDays(parseISO(ds),1)), to); return {start, end}; }
+
+function occurrences(from, to){
+  const out = [];
+  for (let d = new Date(from); d <= to; d = addDays(d,1)){
+    const ds = iso(d);
+    for (const s of D.series){
+      if (!seriesOccursOn(s, d)) continue;
+      const id = s.id + '@' + ds;
+      const o = D.overrides[id] || {};
+      const {start, end} = shiftTimes(ds, s.from, s.to);
+      let status, personId;
+      if (o.cancelled){ status = 'cancelled'; personId = null; }
+      else if ('personId' in o){
+        personId = o.personId;
+        if (!personId) status = o.open ? 'open' : 'vacant';
+        else status = personId === s.personId ? 'ordinary' : 'reassigned';
+      } else { personId = s.personId || null; status = personId ? 'ordinary' : (o.open ? 'open' : 'vacant'); }
+      if (personId && !empById(personId)){ personId = null; status = 'vacant'; }
+      out.push({id, kind:'series', seriesId:s.id, date:ds, start, end, siteId:s.siteId, name:s.name, ordinaryId:s.personId||null,
+        personId, status, absence:o.absence||null, overridden: !!D.overrides[id], breakMin:s.breakMin||0, requires:s.requires||''});
+    }
+  }
+  const f = iso(from), t = iso(to);
+  for (const x of D.singles){
+    if (x.date < f || x.date > t) continue;
+    const {start, end} = shiftTimes(x.date, x.from, x.to);
+    let personId = x.personId && empById(x.personId) ? x.personId : null;
+    const status = x.cancelled ? 'cancelled' : personId ? 'extra' : (x.open ? 'open' : 'vacant');
+    if (x.cancelled) personId = null;
+    out.push({id:'x:'+x.id, kind:'single', singleId:x.id, date:x.date, start, end, siteId:x.siteId, name:x.name, ordinaryId:null,
+      personId, status, absence:null, overridden:false, breakMin:x.breakMin||0, requires:x.requires||''});
+  }
+  out.sort((a,b) => a.start - b.start || a.name.localeCompare(b.name));
+  return out;
+}
+function getOcc(id){
+  let ds;
+  if (id.startsWith('x:')){ const x = D.singles.find(s => 'x:'+s.id===id); if (!x) return null; ds = x.date; }
+  else ds = id.split('@')[1];
+  const d = parseISO(ds);
+  return occurrences(d, d).find(o => o.id===id) || null;
+}
+const hoursOf = o => Math.max(0, (o.end - o.start)/36e5 - (o.breakMin||0)/60);
+const grossH = o => (o.end - o.start)/36e5;
+const occLabel = o => `${o.name} ${fmtD(o.start)} ${fmtT(o.start)}–${fmtT(o.end)}`;
+const STATUS = {ordinary:['Ordinarie',''], reassigned:['Omfördelat','info'], extra:['Extrapass','info'], vacant:['Vakant','err'], open:['Fritt att boka','amber'], cancelled:['Inställt','']};
+
+/* Ändringar av pass */
+function setOcc(occ, patch){
+  if (occ.kind === 'single'){
+    const x = D.singles.find(s => s.id===occ.singleId);
+    if ('personId' in patch) x.personId = patch.personId;
+    if ('open' in patch) x.open = patch.open;
+    if ('cancelled' in patch) x.cancelled = patch.cancelled;
+  } else {
+    const s = seriesById(occ.seriesId);
+    const o = Object.assign({}, D.overrides[occ.id] || {}, patch);
+    if (!o.cancelled && 'personId' in o && o.personId && o.personId === s.personId && !o.open){ delete D.overrides[occ.id]; }
+    else D.overrides[occ.id] = o;
+  }
+  save();
+}
+
+/* =========================================================
+   Regelkontroll (ATL + avtal)
+   ========================================================= */
+function maxFree(intervals, ws, we){
+  let best = 0, cur = ws;
+  for (const [a,b] of intervals){ const st = Math.max(a, ws); if (st > cur) best = Math.max(best, st - cur); cur = Math.max(cur, Math.min(b, we)); }
+  return Math.max(best, we - cur);
+}
+function checkPerson(emp, shifts){
+  const R = D.settings.rules; const issues = [];
+  const add = (level, rule, msg, ids, key) => issues.push({level, rule, msg, shifts:ids, key: key || (rule+':'+ids.join(',')), personId: emp.id});
+  for (let i=0;i<shifts.length;i++){
+    const s = shifts[i], len = grossH(s);
+    if (len > 13) add('error','Passlängd',`Passet är ${hrs(len)} h. Det ger inte utrymme för 11 h dygnsvila inom 24 h (ATL 13 §).`,[s.id]);
+    else if (len > R.maxShift) add('warn','Passlängd',`Passet är ${hrs(len)} h, längre än tillåtna ${R.maxShift} h.`,[s.id]);
+    if (i>0 && shifts[i-1].end > s.start) add('error','Dubbelbokning',`Överlappar ${occLabel(shifts[i-1])}.`,[shifts[i-1].id, s.id]);
+    if ((emp.start && s.date < emp.start) || (emp.end && s.date > emp.end)) add('error','Anställning',`Passet ligger utanför anställningsperioden (${emp.start||'…'} – ${emp.end||'tills vidare'}).`,[s.id]);
+    if (s.requires && !(emp.certs||[]).includes(s.requires)) add('warn','Behörighet',`Passet kräver behörighet som ${CERTS[s.requires]||s.requires}.`,[s.id]);
+  }
+  // Dygnsvila: varje 24-timmarsperiod från ett passtart ska ha minst X h sammanhängande vila
+  for (let i=0;i<shifts.length;i++){
+    const ws = shifts[i].start.getTime(), we = ws + 864e5;
+    const win = []; for (let j=i; j<shifts.length && shifts[j].start.getTime() < we; j++) win.push(shifts[j]);
+    if (win.length < 2) continue;
+    const free = maxFree(win.map(s => [s.start.getTime(), s.end.getTime()]), ws, we) / 36e5;
+    if (free < R.minDailyRest - 1e-9){
+      const last = win[win.length-1], prev = win[win.length-2];
+      const gap = Math.max(0, (last.start - prev.end)/36e5);
+      add('error','Dygnsvila',`${hrs(gap)} h vila mellan ${occLabel(prev)} och ${occLabel(last)}. Krav: ${R.minDailyRest} h sammanhängande vila per 24 h (ATL 13 §).`,[prev.id,last.id],'dygn:'+prev.id+','+last.id);
+    }
+  }
+  // Veckovila per kalendervecka & snittarbetstid
+  const weeks = new Map();
+  for (const s of shifts){ for (const k of new Set([iso(mondayOf(s.start)), iso(mondayOf(new Date(s.end.getTime()-1)))])){ if (!weeks.has(k)) weeks.set(k, []); weeks.get(k).push(s); } }
+  const weekHours = new Map();
+  for (const s of shifts){ const k = iso(mondayOf(s.start)); weekHours.set(k, (weekHours.get(k)||0) + hoursOf(s)); }
+  for (const [k, list] of weeks){
+    const ws = parseISO(k).getTime(), we = addDays(parseISO(k),7).getTime();
+    const free = maxFree(list.map(s => [s.start.getTime(), s.end.getTime()]).sort((a,b)=>a[0]-b[0]), ws, we) / 36e5;
+    if (free < R.minWeeklyRest - 1e-9) add('error','Veckovila',`Vecka ${isoWeek(parseISO(k))}: längsta sammanhängande ledighet är ${hrs(free)} h. Krav: ${R.minWeeklyRest} h per sjudagarsperiod (ATL 14 §).`, list.map(s=>s.id), 'vecka:'+emp.id+':'+k);
+    const n = Math.max(1, R.avgWeeks|0); let sum = 0;
+    for (let w=0; w<n; w++) sum += weekHours.get(iso(addDays(parseISO(k), -7*w))) || 0;
+    const avg = sum / n;
+    if (avg > R.maxAvgWeek + 1e-9 && weekHours.get(k)) add('warn','Arbetstid',`I snitt ${hrs(avg)} h/vecka under ${n} veckor fram till v.${isoWeek(parseISO(k))}. Max ${R.maxAvgWeek} h sammanlagd arbetstid i snitt (ATL 10 b §).`, list.filter(s=>iso(mondayOf(s.start))===k).map(s=>s.id), 'snitt:'+emp.id+':'+k);
+  }
+  // Övertid per kalendermånad för heltidsanställda månadsavlönade
+  if (FORMS[emp.form]?.pay === 'month' && (emp.grad||0) >= 100){
+    const months = new Map();
+    for (const s of shifts){ if (s.kind==='single' || s.ordinaryId !== emp.id){ const k = s.date.slice(0,7); if (!months.has(k)) months.set(k, []); months.get(k).push(s); } }
+    for (const [k, list] of months){ const h = list.reduce((a,s)=>a+hoursOf(s),0); if (h > R.maxOtMonth) add('warn','Övertid',`${hrs(h)} h extratid i ${MONTHS[+k.slice(5)-1]}. Max ${R.maxOtMonth} h allmän övertid per månad (ATL 8 §).`, list.map(s=>s.id), 'ot:'+emp.id+':'+k); }
+  }
+  const seen = new Set();
+  return issues.filter(i => seen.has(i.key) ? false : (seen.add(i.key), true));
+}
+const memo = new Map();
+function analyze(from, to){
+  const key = VER+'|'+iso(from)+'|'+iso(to);
+  if (memo.has(key)) return memo.get(key);
+  const occs = occurrences(addDays(from,-35), addDays(to,35));
+  const byOcc = new Map(), list = [], f = iso(from), t = iso(to), byId = new Map(occs.map(o=>[o.id,o]));
+  for (const emp of D.employees){
+    const shifts = occs.filter(o => o.personId===emp.id && o.status!=='cancelled');
+    if (!shifts.length) continue;
+    for (const is of checkPerson(emp, shifts)){
+      for (const id of is.shifts){ if (!byOcc.has(id)) byOcc.set(id, []); byOcc.get(id).push(is); }
+      if (is.shifts.some(id => { const o = byId.get(id); return o && o.date >= f && o.date <= t; })) list.push(is);
+    }
+  }
+  const inRange = occs.filter(o => o.date >= f && o.date <= t);
+  const res = {occs: inRange, all: occs, byOcc, list, byId};
+  if (memo.size > 30) memo.clear();
+  memo.set(key, res);
+  return res;
+}
+function simulate(occ, pid, pool){
+  const emp = empById(pid); if (!emp) return [];
+  const occs = pool || occurrences(addDays(occ.start,-35), addDays(occ.start,35));
+  const shifts = occs.filter(o => o.personId===pid && o.status!=='cancelled' && o.id!==occ.id);
+  shifts.push(Object.assign({}, occ, {personId:pid, status: occ.kind==='single' ? 'extra' : (pid===occ.ordinaryId ? 'ordinary':'reassigned')}));
+  shifts.sort((a,b)=>a.start-b.start);
+  return checkPerson(emp, shifts).filter(i => i.shifts.includes(occ.id));
+}
+const worst = list => list.some(i=>i.level==='error') ? 'error' : list.length ? 'warn' : null;
+
+/* =========================================================
+   Lön
+   ========================================================= */
+function obCat(d){
+  const h = holiday(d);
+  if (h && h.storhelg) return 'storhelg';
+  if (h || wdIdx(d) >= 5) return 'helg';
+  const hr = d.getHours();
+  if (hr >= 22 || hr < 6) return 'natt';
+  if (hr >= 18) return 'kvall';
+  return null;
+}
+const isEnkelOt = d => !holiday(d) && wdIdx(d) < 5 && d.getHours() >= 6 && d.getHours() < 20;
+const splitCache = new Map();
+function obSplit(o){
+  const key = o.start.getTime()+'-'+o.end.getTime();
+  if (splitCache.has(key)) return splitCache.get(key);
+  const r = {kvall:0, natt:0, helg:0, storhelg:0, enkel:0, kval:0, total:0};
+  for (let t = o.start.getTime(); t < o.end.getTime(); t += 6e4){ const d = new Date(t); const c = obCat(d); if (c) r[c]++; if (isEnkelOt(d)) r.enkel++; else r.kval++; r.total++; }
+  splitCache.set(key, r); return r;
+}
+function monthRange(ym){ const [y,m] = ym.split('-').map(Number); return [new Date(y,m-1,1), new Date(y,m,0)]; }
+function calcPay(emp, ym, occsMonth){
+  const S = D.settings, lg = lgOf(emp), mlon = lg ? lg.salary : 0, tim = mlon / S.divisor;
+  const hourly = FORMS[emp.form]?.pay === 'hour', grad = hourly ? 0 : (emp.grad||0);
+  const occs = occsMonth || (() => { const [a,b] = monthRange(ym); return occurrences(a,b); })();
+  const worked = occs.filter(o => o.personId===emp.id && o.status!=='cancelled');
+  const absent = occs.filter(o => o.kind==='series' && o.ordinaryId===emp.id && ['vacant','open','reassigned'].includes(o.status));
+  let ord=0, extra=0, enkel=0, kval=0, atfH=0; const ob = {kvall:0, natt:0, helg:0, storhelg:0};
+  const shiftRows = [];
+  for (const o of worked){
+    const h = hoursOf(o), sp = obSplit(o), f = sp.total ? (h*60/sp.total)/60 : 0;
+    const isOrd = o.kind==='series' && o.ordinaryId===emp.id;
+    if (isOrd || hourly) ord += h; else { extra += h; enkel += sp.enkel*f; kval += sp.kval*f; }
+    let obh = 0;
+    for (const c in ob){ ob[c] += sp[c]*f; obh += sp[c]*f; atfH += sp[c]*f*(S.atf[c]||0)/60; }
+    shiftRows.push({o, h, obh, type: hourly ? 'Timlön' : isOrd ? 'Ordinarie' : (grad<100 ? 'Mertid' : 'Övertid')});
+  }
+  const lines = [];
+  const L = (text, qty, price, amount, kind) => lines.push({text, qty, price, amount: r2(amount ?? (qty*price)), kind: kind||'pay'});
+  if (hourly) { if (ord) L('Timlön', ord, tim); }
+  else L(`Månadslön (${grad} %)`, null, null, mlon*grad/100);
+  if (!hourly && extra){
+    if (grad < 100) L('Mertid', extra, tim);
+    else { if (enkel) L('Övertid, enkel (mån–fre 06–20)', enkel, mlon/S.otEnkel); if (kval) L('Övertid, kvalificerad', kval, mlon/S.otKval); }
+  }
+  for (const c in ob) if (ob[c] > 0.001) L('OB-tillägg ' + OBCATS[c].toLowerCase(), ob[c], S.ob[c]);
+  const absH = {};
+  for (const o of absent){ const r = o.absence || 'ovrigt'; absH[r] = (absH[r]||0) + hoursOf(o); }
+  if (!hourly){
+    if (absH.sjuk){
+      L('Sjukavdrag', absH.sjuk, -tim);
+      L(`Sjuklön ${S.sickPct} %`, absH.sjuk, tim*S.sickPct/100);
+      const veckoSjuklon = (S.sickPct/100) * (mlon*grad/100) * 12 / 52;
+      L(`Karensavdrag (${S.karensPct} % av veckosjuklön)`, null, null, -veckoSjuklon*S.karensPct/100);
+    }
+    if (absH.tjl) L('Avdrag tjänstledighet', absH.tjl, -tim);
+    if (absH.vab) L('Avdrag VAB / föräldraledighet', absH.vab, -tim);
+    for (const r of ['semester','utb','ovrigt']) if (absH[r]) L(`${ABS[r]} (ingen löneändring)`, absH[r], 0, 0, 'info');
+  }
+  if (S.atfMode === 'utbetalning' && atfH > 0.001) L('Arbetstidsförkortning, utbetalning', atfH, tim);
+  if (hourly){
+    const base = lines.filter(l => l.amount > 0).reduce((a,l)=>a+l.amount,0);
+    if (base) L(`Semesterersättning ${S.semErs} %`, null, null, base*S.semErs/100);
+  }
+  const brutto = r2(lines.reduce((a,l)=>a+l.amount,0));
+  const obH = Object.values(ob).reduce((a,b)=>a+b,0), obKr = Object.keys(ob).reduce((a,c)=>a+ob[c]*S.ob[c],0);
+  const absTot = Object.values(absH).reduce((a,b)=>a+b,0);
+  return {emp, lg, mlon, tim, hourly, grad, ord, extra, enkel, kval, ob, obH, obKr, absH, absTot, atfH, lines, brutto, shiftRows};
+}
+function atfYTD(emp, ym){
+  const [y,m] = ym.split('-').map(Number); let tot = 0;
+  const occs = occurrences(new Date(y,0,1), new Date(y,m,0));
+  for (let i=1;i<=m;i++){ const k = `${y}-${pad(i)}`; tot += calcPay(emp, k, occs.filter(o=>o.date.slice(0,7)===k)).atfH; }
+  return tot;
+}
+
+/* =========================================================
+   Export (PDF / Excel)
+   ========================================================= */
+const DL = (window.claude && typeof window.claude.use === 'function') ? window.claude.use('downloads').catch(()=>null) : Promise.resolve(null);
+async function offerFile(filename, blob){
+  let dl = null; try { dl = await DL; } catch(e){}
+  if (dl){
+    try { await dl.save({filename, data: blob}); toast(`${filename} sparad`); }
+    catch(e){ const c = e && e.code; toast(c==='declined' ? 'Nedladdningen avbröts.' : c==='rate_limited' ? 'Vänta ett ögonblick och försök igen.' : `Filen kunde inte sparas här (${c||'okänt fel'}).`); }
+    return;
+  }
+  const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url), 5000); toast(`${filename} skapad`);
+}
+function libsOk(kind){
+  if (kind==='pdf' && !(window.jspdf && window.jspdf.jsPDF)) { toast('PDF-biblioteket har inte laddats. Kontrollera nätverket.'); return false; }
+  if (kind==='xlsx' && !window.XLSX) { toast('Excel-biblioteket har inte laddats. Kontrollera nätverket.'); return false; }
+  return true;
+}
+function pdfDoc(title, subtitle, landscape){
+  const doc = new window.jspdf.jsPDF({orientation: landscape?'landscape':'portrait', unit:'mm', format:'a4'});
+  pdfHeader(doc, title, subtitle); return doc;
+}
+function pdfHeader(doc, title, subtitle){
+  doc.setFont('helvetica','bold'); doc.setFontSize(15); doc.setTextColor(20,32,44); doc.text(title, 14, 16);
+  doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(90,102,119); doc.text(subtitle, 14, 22); doc.setTextColor(0);
+}
+function pdfTable(doc, head, body, startY, opts){
+  doc.autoTable(Object.assign({head:[head], body, startY: startY||27, theme:'grid', styles:{fontSize:8, cellPadding:1.6, lineColor:[211,217,225], lineWidth:.1, textColor:[20,32,44]}, headStyles:{fillColor:[19,32,48], textColor:255, fontStyle:'bold'}, alternateRowStyles:{fillColor:[244,246,249]}, margin:{left:14,right:14}}, opts||{}));
+  return doc.lastAutoTable.finalY;
+}
+function pdfFooter(doc){
+  const n = doc.getNumberOfPages();
+  for (let i=1;i<=n;i++){ doc.setPage(i); doc.setFontSize(8); doc.setTextColor(120); const w = doc.internal.pageSize.getWidth(), h = doc.internal.pageSize.getHeight(); doc.text(`Vaktplan · utskrivet ${iso(new Date())} · sida ${i} av ${n}`, 14, h-8); }
+}
+function xlsxBlob(sheets){
+  const wb = XLSX.utils.book_new();
+  for (const [name, rows, widths] of sheets){ const ws = XLSX.utils.aoa_to_sheet(rows); if (widths) ws['!cols'] = widths.map(w=>({wch:w})); XLSX.utils.book_append_sheet(wb, ws, name.slice(0,31)); }
+  const out = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+  return new Blob([out], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+function scheduleRows(occs, byOcc){
+  return occs.map(o => {
+    const is = byOcc ? (byOcc.get(o.id)||[]) : [];
+    return [o.date, WD[wdIdx(o.start)], siteById(o.siteId)?.name||'', o.name, fmtT(o.start), fmtT(o.end), r2(hoursOf(o)), o.personId ? empName(o.personId) : '', STATUS[o.status][0], o.absence ? ABS[o.absence] + (o.ordinaryId ? ' ('+firstName(o.ordinaryId)+')' : '') : '', is.map(i=>i.rule).filter((v,i,a)=>a.indexOf(v)===i).join(', ')];
+  });
+}
+const SCHED_HEAD = ['Datum','Dag','Objekt','Pass','Start','Slut','Timmar','Personal','Status','Frånvaro','Regelvarning'];
+
+async function exportSchedule(kind, from, to, personId){
+  if (!libsOk(kind)) return;
+  const A = analyze(from, to);
+  let occs = A.occs; if (personId) occs = occs.filter(o => o.personId===personId && o.status!=='cancelled');
+  const rows = scheduleRows(occs, A.byOcc);
+  const w1 = isoWeek(from), w2 = isoWeek(to);
+  const label = personId ? `Schema ${empName(personId)}` : 'Schema';
+  const sub = `v.${w1}${w1!==w2?'–'+w2:''} · ${iso(from)} – ${iso(to)} · ${occs.length} pass`;
+  const fname = `${label.replace(/\s+/g,'_')}_v${w1}${w1!==w2?'-'+w2:''}_${from.getFullYear()}`;
+  if (kind==='pdf'){
+    const doc = pdfDoc(label, sub, true);
+    pdfTable(doc, SCHED_HEAD, rows, 27, {didParseCell: d => { if (d.section==='body' && d.column.index===8){ const v = d.cell.raw; if (v==='Vakant') d.cell.styles.textColor=[180,35,24]; if (v==='Fritt att boka') d.cell.styles.textColor=[152,90,0]; } }});
+    pdfFooter(doc); await offerFile(fname+'.pdf', doc.output('blob'));
+  } else {
+    const days = []; for (let d = new Date(from); d <= to; d = addDays(d,1)) days.push(d);
+    const grid = [['Objekt','Pass','Tid', ...days.map(d => `${WD[wdIdx(d)]} ${fmtD(d)}`)]];
+    for (const s of D.series){ const r = [siteById(s.siteId)?.name||'', s.name, `${s.from}–${s.to}`]; let any = false;
+      for (const d of days){ const o = A.occs.find(x => x.seriesId===s.id && x.date===iso(d)); if (o) any = true; r.push(o ? (o.personId ? empName(o.personId) : STATUS[o.status][0].toUpperCase()) : ''); }
+      if (any) grid.push(r); }
+    const singles = A.occs.filter(o=>o.kind==='single');
+    for (const o of singles){ const r = [siteById(o.siteId)?.name||'', o.name, `${fmtT(o.start)}–${fmtT(o.end)}`]; for (const d of days) r.push(iso(d)===o.date ? (o.personId ? empName(o.personId) : STATUS[o.status][0].toUpperCase()) : ''); grid.push(r); }
+    await offerFile(fname+'.xlsx', xlsxBlob([['Pass', [SCHED_HEAD, ...rows], [11,5,20,18,7,7,8,18,14,22,24]], ['Schema', grid, [20,18,12, ...days.map(()=>14)]]]));
+  }
+}
+function payRows(results){
+  return results.map(p => [p.emp.name, FORMS[p.emp.form].name, p.lg ? p.lg.name : '', p.hourly ? 'Tim' : p.grad+' %', r2(p.ord), r2(p.extra), r2(p.obH), r2(p.obKr), r2(p.absTot), r2(p.atfH), r2(p.brutto)]);
+}
+const PAY_HEAD = ['Namn','Anställningsform','Lönegrupp','Grad','Ord. tim','Mertid/övertid tim','OB-tim','OB kr','Frånvaro tim','ATF intjänat tim','Bruttolön kr'];
+function specTable(p){ return p.lines.map(l => [l.text, l.qty==null ? '' : num(l.qty), l.price==null ? '' : num(l.price), num(l.amount)]); }
+async function exportPayroll(kind, ym, onlyId){
+  if (!libsOk(kind)) return;
+  const [a,b] = monthRange(ym); const occs = occurrences(a,b);
+  const emps = D.employees.filter(e => !onlyId || e.id===onlyId);
+  const results = emps.map(e => calcPay(e, ym, occs)).filter(p => onlyId || p.brutto || p.ord || p.extra);
+  const mname = `${MONTHS[a.getMonth()]} ${a.getFullYear()}`;
+  const fname = onlyId ? `Lonespec_${emps[0].name.replace(/\s+/g,'_')}_${ym}` : `Lon_${ym}`;
+  if (kind==='pdf'){
+    const doc = pdfDoc(onlyId ? `Lönespecifikation – ${emps[0].name}` : `Lönesammanställning ${mname}`, `Löneperiod ${iso(a)} – ${iso(b)} · Preliminär beräkning enligt inställda avtalsvärden`, !onlyId);
+    if (!onlyId){
+      const tot = results.reduce((s,p)=>s+p.brutto,0);
+      pdfTable(doc, PAY_HEAD, [...payRows(results).map(r => r.map((v,i)=> i>=4 ? num(v) : v)), ['Summa','','','','','','','','','',num(tot)]], 27, {columnStyles:Object.fromEntries([4,5,6,7,8,9,10].map(i=>[i,{halign:'right'}]))});
+    }
+    results.forEach((p, idx) => {
+      if (!onlyId || idx>0) { doc.addPage('a4','portrait'); pdfHeader(doc, `Lönespecifikation – ${p.emp.name}`, `Löneperiod ${mname} · ${FORMS[p.emp.form].name}${p.hourly?'':' '+p.grad+' %'} · ${p.lg?p.lg.name:''}`); }
+      let y = pdfTable(doc, ['Benämning','Antal','À-pris','Belopp'], [...specTable(p), ['Bruttolön','','',num(p.brutto)]], 27, {columnStyles:{1:{halign:'right'},2:{halign:'right'},3:{halign:'right'}}, didParseCell:d=>{ if (d.section==='body' && d.row.index===p.lines.length) d.cell.styles.fontStyle='bold'; }});
+      doc.setFontSize(9); doc.text(`Arbetstidsförkortning intjänad: ${num(p.atfH)} h (${D.settings.atfMode==='saldo'?'till saldo':'utbetalas'}). Timlön ${num(p.tim)} kr (månadslön ${num(p.mlon)} / ${D.settings.divisor}).`, 14, y+7);
+      pdfTable(doc, ['Datum','Pass','Tid','Typ','Timmar','Varav OB'], p.shiftRows.map(r => [r.o.date, `${siteById(r.o.siteId)?.name||''} – ${r.o.name}`, `${fmtT(r.o.start)}–${fmtT(r.o.end)}`, r.type, num(r.h), num(r.obh)]), y+12, {columnStyles:{4:{halign:'right'},5:{halign:'right'}}});
+    });
+    pdfFooter(doc); await offerFile(fname+'.pdf', doc.output('blob'));
+  } else {
+    const lines = [['Namn','Benämning','Antal','À-pris','Belopp']];
+    results.forEach(p => { p.lines.forEach(l => lines.push([p.emp.name, l.text, l.qty==null?'':r2(l.qty), l.price==null?'':r2(l.price), l.amount])); lines.push([p.emp.name, 'Bruttolön','','',p.brutto]); });
+    const shifts = [['Namn','Datum','Objekt','Pass','Start','Slut','Typ','Timmar','OB-timmar']];
+    results.forEach(p => p.shiftRows.forEach(r => shifts.push([p.emp.name, r.o.date, siteById(r.o.siteId)?.name||'', r.o.name, fmtT(r.o.start), fmtT(r.o.end), r.type, r2(r.h), r2(r.obh)])));
+    await offerFile(fname+'.xlsx', xlsxBlob([['Sammanställning', [PAY_HEAD, ...payRows(results)], [20,28,22,7,9,12,8,10,11,12,13]], ['Lönerader', lines, [20,40,9,10,12]], ['Pass', shifts, [20,11,20,22,7,7,10,8,9]]]));
+  }
+}
+async function exportStaff(kind){
+  if (!libsOk(kind)) return;
+  const head = ['Namn','Roll','Anställningsform','Grad','Lönegrupp','Behörighet','Från','Till','Telefon','E-post'];
+  const rows = D.employees.map(e => [e.name, e.role==='arbetsledare'?'Arbetsledare':'Personal', FORMS[e.form].name, FORMS[e.form].pay==='hour'?'Tim':e.grad+' %', lgOf(e)?.name||'', (e.certs||[]).map(c=>CERTS[c]).join(', '), e.start||'', e.end||'', e.phone||'', e.email||'']);
+  if (kind==='pdf'){ const doc = pdfDoc('Personalförteckning', `${rows.length} anställda · ${iso(new Date())}`, true); pdfTable(doc, head, rows); pdfFooter(doc); await offerFile('Personal.pdf', doc.output('blob')); }
+  else await offerFile('Personal.xlsx', xlsxBlob([['Personal', [head, ...rows], [20,13,30,6,22,30,11,11,15,28]]]));
+}
+
+/* =========================================================
+   UI-ramverk
+   ========================================================= */
+const $ = s => document.querySelector(s);
+let toastT = null;
+function toast(msg){ const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(()=>{ t.hidden = true; }, 3200); }
+function openModal(html, wide){ const d = $('#dialog'); d.className = 'dialog' + (wide?' wide':''); d.innerHTML = html; $('#modal').hidden = false; }
+function closeModal(){ $('#modal').hidden = true; $('#dialog').innerHTML = ''; UI.modal = null; UI.draft = null; UI.pendingForce = null; }
+function refreshModal(){ if (UI.modal) { const st = $('#dialog').scrollTop; openModal(UI.modal(), UI.modalWide); $('#dialog').scrollTop = st; } }
+function showModal(fn, wide){ UI.modal = fn; UI.modalWide = !!wide; openModal(fn(), wide); }
+
+const me = () => empById(UI.user) || D.employees[0];
+const isLead = () => me().role === 'arbetsledare';
+const LEAD_NAV = [['overview','Översikt'],['schedule','Schema'],['series','Löpande pass'],['vacant','Vakanta pass'],['staff','Personal'],['rules','Regelkontroll'],['pay','Lön'],['settings','Inställningar']];
+const STAFF_NAV = [['mine','Mitt schema'],['openshifts','Lediga pass'],['mypay','Min lön']];
+
+function render(){
+  const lead = isLead(); const nav = lead ? LEAD_NAV : STAFF_NAV;
+  if (!nav.some(n => n[0]===UI.view)) UI.view = nav[0][0];
+  const t0 = today0(); const A = analyze(t0, addDays(t0, 27));
+  const vac = A.occs.filter(o => o.status==='vacant').length, open = A.occs.filter(o=>o.status==='open').length;
+  const errs = A.list.filter(i=>i.level==='error').length;
+  const counts = lead ? {vacant: vac ? [vac,''] : null, rules: errs ? [errs,''] : null} : {openshifts: open ? [open,'amber'] : null};
+  $('#app').innerHTML = `
+  <aside class="side">
+    <div class="brand"><div class="brand-mark" aria-hidden="true">V</div><div><b>Vaktplan</b><small>Bevakning · schema &amp; lön</small></div></div>
+    <div class="who"><label for="who">Inloggad som (demo)</label>
+      <select id="who" data-chg="who">${D.employees.map(e => `<option value="${e.id}" ${e.id===UI.user?'selected':''}>${esc(e.name)}${e.role==='arbetsledare'?' · arbetsledare':''}</option>`).join('')}</select></div>
+    <nav class="nav" aria-label="Huvudmeny">${nav.map(([k,l]) => `<button data-act="nav" data-v="${k}" ${UI.view===k?'aria-current="page"':''}><span>${l}</span>${counts[k] ? `<span class="count ${counts[k][1]}">${counts[k][0]}</span>`:''}</button>`).join('')}</nav>
+    <div class="side-foot">Data sparas lokalt i den här webbläsaren. Siffrorna i inställningarna är exempelvärden.</div>
+  </aside>
+  <main class="main" id="main">${VIEWS[UI.view]()}</main>`;
+  saveUI();
+}
+
+/* =========================================================
+   Gemensamma bitar
+   ========================================================= */
+function chipHtml(o, issues, mode){
+  const lvl = worst(issues||[]);
+  let label;
+  if (o.status==='vacant') label = 'VAKANT'; else if (o.status==='open') label = 'Fritt pass'; else if (o.status==='cancelled') label = 'Inställt';
+  else label = mode==='person' ? esc(o.name) : esc(firstName(o.personId));
+  const sub = mode==='person' ? `${fmtT(o.start)}–${fmtT(o.end)} · ${esc(siteById(o.siteId)?.name||'')}` : `${fmtT(o.start)}–${fmtT(o.end)}`;
+  const flag = lvl ? `<span class="flag ${lvl==='error'?'err':'warn'}" title="${esc((issues||[]).map(i=>i.rule+': '+i.msg).join('\n'))}">${lvl==='error'?'ATL':'!'}</span>` : '';
+  return `<button class="chip ${o.status}" data-act="shift" data-id="${esc(o.id)}">${flag}${label}<span class="t">${sub}</span></button>`;
+}
+function issuesHtml(list, okText){
+  if (!list.length) return okText ? `<div class="issues-box"><div class="row ok">${okText}</div></div>` : '';
+  return `<div class="issues-box">${list.map(i => `<div class="row ${i.level==='error'?'err':'warn'}"><b>${i.level==='error'?'Bryter mot regel':'Varning'} · ${esc(i.rule)}:</b> ${esc(i.msg)}</div>`).join('')}</div>`;
+}
+function statusPill(o){ const [t,c] = STATUS[o.status]; return `<span class="pill ${c}">${t}</span>`; }
+function patternText(s){
+  const fmt = days => { const d = [...days].sort((a,b)=>a-b); const parts = []; let i = 0;
+    while (i < d.length){ let j = i; while (j+1 < d.length && d[j+1]===d[j]+1) j++; parts.push(j>i ? `${WD[d[i]]}–${WD[d[j]]}` : WD[d[i]]); i = j+1; }
+    return parts.join(', ') || 'ledigt'; };
+  const c = Math.max(1, s.cycle|0);
+  if (c===1) return `${fmt(s.days[0]||[])} varje vecka`;
+  const ord = {2:'varannan vecka',3:'var tredje vecka',4:'var fjärde vecka'}[c] || `var ${c}:e vecka`;
+  return Array.from({length:c}, (_,i) => `V${i+1}: ${fmt(s.days[i]||[])}`).join(' · ') + ` (upprepas ${ord})`;
+}
+function seriesWeekHours(s){
+  const c = Math.max(1,s.cycle|0); const {start,end} = shiftTimes('2026-01-05', s.from, s.to);
+  const h = Math.max(0,(end-start)/36e5 - (s.breakMin||0)/60);
+  let n = 0; for (let i=0;i<c;i++) n += (s.days[i]||[]).length; return h*n/c;
+}
+function empOptions(sel, withNone, noneLabel){
+  return (withNone ? `<option value="">${noneLabel||'— Ingen —'}</option>` : '') + D.employees.map(e => `<option value="${e.id}" ${e.id===sel?'selected':''}>${esc(e.name)}</option>`).join('');
+}
+function confirmBox(key, text, actLabel, act, extra){
+  if (UI.confirm !== key) return '';
+  return `<div class="inline-confirm"><div>${text}</div><div class="toolbar"><button class="btn danger" data-act="${act}" ${extra||''}>${actLabel}</button><button class="btn" data-act="confirmCancel">Avbryt</button></div></div>`;
+}
+
+/* =========================================================
+   Vyer – arbetsledare
+   ========================================================= */
+const VIEWS = {};
+VIEWS.overview = () => {
+  const t0 = today0(); const A = analyze(t0, addDays(t0,27));
+  const next14 = A.occs.filter(o => o.start < addDays(t0,14));
+  const vac = next14.filter(o=>o.status==='vacant'), open = next14.filter(o=>o.status==='open');
+  const errs = A.list.filter(i=>i.level==='error'), warns = A.list.filter(i=>i.level==='warn');
+  const todays = A.occs.filter(o => o.date===iso(t0) && o.status!=='cancelled');
+  const hol = holiday(t0);
+  return `
+  <div class="page-head"><div><div class="eyebrow">Vecka ${isoWeek(t0)} · ${fmtLong(t0)}${hol?' · '+esc(hol.name):''}</div><h1>Översikt</h1><p>Läget för de kommande fyra veckorna: vad som behöver bemannas och vilka pass som bryter mot arbetstidsreglerna.</p></div>
+    <div class="toolbar"><button class="btn primary" data-act="newSingle">+ Extrapass</button><button class="btn" data-act="newSeries">+ Löpande pass</button></div></div>
+  <div class="kpis">
+    <div class="kpi ${vac.length?'err':''}"><span class="v">${vac.length}</span><span class="l">vakanta pass, 14 dagar</span></div>
+    <div class="kpi ${open.length?'amber':''}"><span class="v">${open.length}</span><span class="l">fria pass att boka, 14 dagar</span></div>
+    <div class="kpi ${errs.length?'err':''}"><span class="v">${errs.length}</span><span class="l">regelbrott, 4 veckor</span></div>
+    <div class="kpi"><span class="v">${warns.length}</span><span class="l">varningar, 4 veckor</span></div>
+  </div>
+  <div class="grid2">
+    <section class="panel"><div class="panel-h"><h2>Pass i dag</h2><span class="muted small">${todays.length} pass</span></div>
+      <div class="list">${todays.length ? todays.map(o => `<div class="item"><div class="main-t"><b class="mono">${fmtT(o.start)}–${fmtT(o.end)}</b> ${esc(o.name)} <span class="meta">· ${esc(siteById(o.siteId)?.name||'')}</span></div><div class="toolbar">${o.personId?`<span>${esc(empName(o.personId))}</span>`:''}${statusPill(o)}<button class="btn sm" data-act="shift" data-id="${esc(o.id)}">Öppna</button></div></div>`).join('') : '<div class="empty">Inga pass i dag.</div>'}</div></section>
+    <section class="panel"><div class="panel-h"><h2>Behöver bemannas</h2><button class="btn sm" data-act="nav" data-v="vacant">Alla vakanta</button></div>
+      <div class="list">${[...vac, ...open].sort((a,b)=>a.start-b.start).slice(0,8).map(o => `<div class="item"><div class="main-t"><b>${WD[wdIdx(o.start)]} ${fmtD(o.start)}</b> <span class="mono">${fmtT(o.start)}–${fmtT(o.end)}</span> ${esc(o.name)}<div class="meta">${esc(siteById(o.siteId)?.name||'')}${o.absence?` · ${ABS[o.absence]} (${esc(firstName(o.ordinaryId))})`:''}</div></div><div class="toolbar">${statusPill(o)}<button class="btn sm primary" data-act="shift" data-id="${esc(o.id)}">Tilldela</button></div></div>`).join('') || '<div class="empty">Alla pass de närmaste 14 dagarna är bemannade.</div>'}</div></section>
+    <section class="panel" style="grid-column:1/-1"><div class="panel-h"><h2>Regelbrott att åtgärda</h2><button class="btn sm" data-act="nav" data-v="rules">Regelkontroll</button></div>
+      <div>${errs.slice(0,6).map(issueRow).join('') || '<div class="empty">Inga regelbrott de kommande fyra veckorna.</div>'}</div></section>
+  </div>`;
+};
+function issueRow(i){
+  return `<div class="issue"><span class="pill ${i.level==='error'?'err':'warn'}">${esc(i.rule)}</span><div class="msg"><b>${esc(empName(i.personId))}</b> · ${esc(i.msg)}</div><div class="toolbar">${i.shifts.slice(-2).map(id => `<button class="btn sm" data-act="shift" data-id="${esc(id)}">${esc(shortId(id))}</button>`).join('')}</div></div>`;
+}
+function shortId(id){ const ds = id.startsWith('x:') ? (D.singles.find(s=>'x:'+s.id===id)||{}).date : id.split('@')[1]; if (!ds) return 'Pass'; const d = parseISO(ds); return `${WD[wdIdx(d)]} ${fmtD(d)}`; }
+
+VIEWS.schedule = () => {
+  const weeks = UI.schedWeeks; const from = UI.schedStart, to = addDays(from, weeks*7-1);
+  const A = analyze(from, to); const t0 = iso(today0());
+  const days = []; for (let d = new Date(from); d <= to; d = addDays(d,1)) days.push(d);
+  const head = `<tr><th class="rowh">${UI.schedMode==='pass'?'Pass':'Personal'}</th>${days.map(d => { const h = holiday(d); return `<th class="${iso(d)===t0?'today':''} ${wdIdx(d)===0?'wkstart':''}"><span class="d">${WD[wdIdx(d)]} ${fmtD(d)}</span>${wdIdx(d)===0?` <span class="muted small">v.${isoWeek(d)}</span>`:''}${h?`<span class="h">${esc(h.name)}</span>`:''}</th>`; }).join('')}</tr>`;
+  const cellCls = d => { const h = holiday(d); return [h?'hol':(wdIdx(d)>=5?'we':''), iso(d)===t0?'today':'', wdIdx(d)===0?'wkstart':''].join(' '); };
+  let body = '';
+  if (UI.schedMode === 'pass'){
+    for (const site of D.sites){
+      const ser = D.series.filter(s => s.siteId===site.id && A.occs.some(o => o.seriesId===s.id));
+      const singles = A.occs.filter(o => o.kind==='single' && o.siteId===site.id);
+      if (!ser.length && !singles.length) continue;
+      body += `<tr class="site"><th class="rowh" colspan="1">${esc(site.name)}</th><td colspan="${days.length}"></td></tr>`;
+      for (const s of ser){
+        body += `<tr><th class="rowh"><b>${esc(s.name)}</b><span class="mono">${s.from}–${s.to}</span> <span>· ord. ${esc(s.personId?firstName(s.personId):'ingen')}</span></th>${days.map(d => { const o = A.occs.find(x => x.seriesId===s.id && x.date===iso(d)); return `<td class="${cellCls(d)}">${o ? chipHtml(o, A.byOcc.get(o.id)) : ''}</td>`; }).join('')}</tr>`;
+      }
+      if (singles.length) body += `<tr><th class="rowh"><b>Extrapass</b><span>enstaka pass</span></th>${days.map(d => `<td class="${cellCls(d)}">${singles.filter(o=>o.date===iso(d)).map(o=>chipHtml(o, A.byOcc.get(o.id))).join('')}</td>`).join('')}</tr>`;
+    }
+  } else {
+    const unstaffed = A.occs.filter(o => !o.personId && o.status!=='cancelled');
+    body += `<tr><th class="rowh"><b>Obemannat</b><span>vakanta och fria pass</span></th>${days.map(d => `<td class="${cellCls(d)}">${unstaffed.filter(o=>o.date===iso(d)).map(o=>chipHtml(o, null, 'person')).join('')}</td>`).join('')}</tr>`;
+    for (const e of D.employees){
+      const mine = A.occs.filter(o => o.personId===e.id);
+      const h = mine.reduce((a,o)=>a+hoursOf(o),0);
+      body += `<tr><th class="rowh"><b>${esc(e.name)}</b><span>${FORMS[e.form].pay==='hour'?'Timavlönad':e.grad+' %'} · ${hrs(h)} h i perioden</span></th>${days.map(d => `<td class="${cellCls(d)}">${mine.filter(o=>o.date===iso(d)).map(o=>chipHtml(o, A.byOcc.get(o.id), 'person')).join('')}</td>`).join('')}</tr>`;
+    }
+  }
+  return `
+  <div class="page-head"><div><div class="eyebrow">Vecka ${isoWeek(from)}${weeks>1?'–'+isoWeek(to):''} · ${fmtD(from)} – ${fmtD(to)} ${to.getFullYear()}</div><h1>Schema</h1><p>Klicka på ett pass för att byta personal, göra det vakant eller lägga ut det som fritt att boka.</p></div>
+    <div class="toolbar"><button class="btn primary" data-act="newSingle">+ Extrapass</button><button class="btn" data-act="expSched" data-k="pdf">PDF</button><button class="btn" data-act="expSched" data-k="xlsx">Excel</button></div></div>
+  <div class="toolbar" style="margin-bottom:12px">
+    <div class="seg"><button data-act="schedNav" data-d="-1" aria-label="Föregående period">←</button><button data-act="schedNav" data-d="0">Denna vecka</button><button data-act="schedNav" data-d="1" aria-label="Nästa period">→</button></div>
+    <div class="seg">${[1,2,4].map(w => `<button data-act="schedWeeks" data-w="${w}" aria-pressed="${UI.schedWeeks===w}">${w} v</button>`).join('')}</div>
+    <div class="seg"><button data-act="schedMode" data-m="pass" aria-pressed="${UI.schedMode==='pass'}">Per pass</button><button data-act="schedMode" data-m="person" aria-pressed="${UI.schedMode==='person'}">Per person</button></div>
+  </div>
+  <div class="panel tbl-wrap"><table class="sched"><thead>${head}</thead><tbody>${body || `<tr><td colspan="${days.length+1}" class="empty">Inga pass i perioden.</td></tr>`}</tbody></table></div>
+  <div class="legend"><span><i style="background:var(--surface-2);border:1px solid var(--line)"></i>Ordinarie</span><span><i style="background:var(--info-soft)"></i>Omfördelat / extrapass</span><span><i style="background:var(--err-soft);border:1px dashed var(--err)"></i>Vakant</span><span><i style="background:var(--accent-soft);border:1px dashed var(--warn)"></i>Fritt att boka</span><span><b style="color:var(--err)">ATL</b> bryter mot arbetstidsregel</span><span><b style="color:var(--warn)">!</b> varning</span></div>`;
+};
+
+VIEWS.series = () => {
+  const bySite = D.sites.map(site => ({site, list: D.series.filter(s=>s.siteId===site.id)})).filter(g=>g.list.length);
+  return `
+  <div class="page-head"><div><h1>Löpande pass</h1><p>Återkommande pass med fast mönster, till exempel ”18–06 mån–tis och fre–sön, ons–tors veckan efter, upprepa varannan vecka”. Varje löpande pass har en ordinarie person.</p></div>
+    <div class="toolbar"><button class="btn primary" data-act="newSeries">+ Nytt löpande pass</button></div></div>
+  <div class="stack">${bySite.map(g => `
+    <section class="panel"><div class="panel-h"><h2>${esc(g.site.name)}</h2><span class="muted small">${esc(g.site.address||'')}</span></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pass</th><th>Tid</th><th>Mönster</th><th>Ordinarie</th><th class="n">Snitt h/v</th><th>Period</th><th></th></tr></thead><tbody>
+    ${g.list.map(s => `<tr><td><b>${esc(s.name)}</b>${s.requires?`<div class="muted small">Kräver ${CERTS[s.requires]}</div>`:''}</td><td class="mono">${s.from}–${s.to}${s.breakMin?`<div class="muted small">rast ${s.breakMin} min</div>`:''}</td><td>${esc(patternText(s))}</td><td>${s.personId?esc(empName(s.personId)):'<span class="pill err">Ingen</span>'}</td><td class="n">${hrs(seriesWeekHours(s))}</td><td class="small">${s.start} – ${s.end||'tills vidare'}</td><td><div class="toolbar"><button class="btn sm" data-act="editSeries" data-id="${s.id}">Redigera</button></div>${confirmBox('delSeries:'+s.id, `Ta bort <b>${esc(s.name)}</b> och alla dess undantag?`, 'Ta bort', 'delSeries', `data-id="${s.id}"`)}</td></tr>`).join('')}
+    </tbody></table></div></section>`).join('') || '<div class="panel empty">Inga löpande pass ännu.</div>'}</div>`;
+};
+
+VIEWS.vacant = () => {
+  const t0 = today0(); const A = analyze(t0, addDays(t0, 55));
+  const list = A.occs.filter(o => o.status==='vacant' || o.status==='open');
+  const row = o => `<div class="item"><div class="main-t"><b>${WD[wdIdx(o.start)]} ${fmtD(o.start)}</b> <span class="mono">${fmtT(o.start)}–${fmtT(o.end)}</span> · ${esc(o.name)} <div class="meta">${esc(siteById(o.siteId)?.name||'')} · ${hrs(hoursOf(o))} h${o.requires?' · kräver '+CERTS[o.requires]:''}${o.absence?` · ${ABS[o.absence]} (ord. ${esc(firstName(o.ordinaryId))})`:''}</div></div>
+    <div class="toolbar">${statusPill(o)}${o.status==='vacant'?`<button class="btn sm" data-act="setOpen" data-id="${esc(o.id)}">Lägg ut som fritt</button>`:`<button class="btn sm" data-act="setVacant" data-id="${esc(o.id)}">Dra tillbaka</button>`}<button class="btn sm primary" data-act="shift" data-id="${esc(o.id)}">Tilldela…</button></div></div>`;
+  const vac = list.filter(o=>o.status==='vacant'), open = list.filter(o=>o.status==='open');
+  return `
+  <div class="page-head"><div><h1>Vakanta pass</h1><p>Pass utan bemanning de kommande åtta veckorna. Tilldela direkt eller lägg ut passet så att personalen själv kan boka det under ”Lediga pass”.</p></div>
+    <div class="toolbar">${vac.length?`<button class="btn" data-act="openAll">Lägg ut alla vakanta som fria</button>`:''}</div></div>
+  <div class="stack">
+    <section class="panel"><div class="panel-h"><h2>Vakanta</h2><span class="pill err">${vac.length}</span></div><div class="list">${vac.map(row).join('') || '<div class="empty">Inga vakanta pass.</div>'}</div></section>
+    <section class="panel"><div class="panel-h"><h2>Utlagda som fria att boka</h2><span class="pill amber">${open.length}</span></div><div class="list">${open.map(row).join('') || '<div class="empty">Inga pass är utlagda.</div>'}</div></section>
+  </div>`;
+};
+
+VIEWS.staff = () => {
+  const t0 = today0(); const A = analyze(t0, addDays(t0,27));
+  return `
+  <div class="page-head"><div><h1>Personal</h1><p>Anställningsformer enligt Bevakningsavtalet. Lönegrupp och sysselsättningsgrad styr lönen.</p></div>
+    <div class="toolbar"><button class="btn primary" data-act="editEmp" data-id="">+ Ny personal</button><button class="btn" data-act="expStaff" data-k="pdf">PDF</button><button class="btn" data-act="expStaff" data-k="xlsx">Excel</button></div></div>
+  <div class="panel tbl-wrap"><table class="tbl"><thead><tr><th>Namn</th><th>Anställningsform</th><th class="n">Grad</th><th>Lönegrupp</th><th>Behörighet</th><th>Period</th><th class="n">Pass 4 v</th><th></th></tr></thead><tbody>
+  ${D.employees.map(e => { const n = A.occs.filter(o=>o.personId===e.id).length; const expiring = e.end && dayDiff(t0, parseISO(e.end)) <= 30 && dayDiff(t0, parseISO(e.end)) >= 0;
+    return `<tr class="click" data-act="editEmp" data-id="${e.id}"><td><b>${esc(e.name)}</b>${e.role==='arbetsledare'?' <span class="pill info">Arbetsledare</span>':''}<div class="muted small">${esc(e.phone||'')}</div></td><td>${FORMS[e.form].name}</td><td class="n">${FORMS[e.form].pay==='hour'?'Tim':e.grad+' %'}</td><td>${esc(lgOf(e)?.name||'–')}</td><td class="small">${(e.certs||[]).map(c=>CERTS[c]).join(', ')}</td><td class="small">${e.start||'–'} – ${e.end||'tills vidare'}${expiring?' <span class="pill warn">Slutar snart</span>':''}${FORMS[e.form].needsEnd && !e.end?' <span class="pill err">Slutdatum saknas</span>':''}</td><td class="n">${n}</td><td><button class="btn sm">Redigera</button></td></tr>`; }).join('')}
+  </tbody></table></div>`;
+};
+
+VIEWS.rules = () => {
+  const t0 = today0(); const w = UI.ruleWeeks; const A = analyze(t0, addDays(t0, w*7-1));
+  const errs = A.list.filter(i=>i.level==='error'), warns = A.list.filter(i=>i.level==='warn');
+  const R = D.settings.rules;
+  return `
+  <div class="page-head"><div><h1>Regelkontroll</h1><p>Kontroll mot arbetstidslagen och inställda avtalsgränser för alla bemannade pass.</p></div>
+    <div class="seg">${[2,4,8].map(n => `<button data-act="ruleWeeks" data-w="${n}" aria-pressed="${w===n}">${n} veckor</button>`).join('')}</div></div>
+  <div class="note" style="margin-bottom:16px">Kontrolleras: passlängd (max ${R.maxShift} h), dygnsvila (${R.minDailyRest} h per 24 h, ATL 13 §), veckovila (${R.minWeeklyRest} h per vecka, ATL 14 §), sammanlagd arbetstid (snitt max ${R.maxAvgWeek} h/vecka över ${R.avgWeeks} veckor, ATL 10 b §), allmän övertid (max ${R.maxOtMonth} h/månad, ATL 8 §), dubbelbokning, anställningsperiod och behörighet. Kollektivavtalet kan medge avvikelser; gränserna ändras under Inställningar.</div>
+  <div class="stack">
+    <section class="panel"><div class="panel-h"><h2>Regelbrott</h2><span class="pill err">${errs.length}</span></div><div>${errs.map(issueRow).join('') || '<div class="empty">Inga regelbrott i perioden.</div>'}</div></section>
+    <section class="panel"><div class="panel-h"><h2>Varningar</h2><span class="pill warn">${warns.length}</span></div><div>${warns.map(issueRow).join('') || '<div class="empty">Inga varningar i perioden.</div>'}</div></section>
+  </div>`;
+};
+
+VIEWS.pay = () => {
+  const ym = UI.payMonth; const [a,b] = monthRange(ym); const occs = occurrences(a,b);
+  const res = D.employees.map(e => calcPay(e, ym, occs));
+  const tot = k => res.reduce((s,p)=>s+p[k],0);
+  return `
+  <div class="page-head"><div><div class="eyebrow">Löneperiod ${iso(a)} – ${iso(b)}</div><h1>Lön ${MONTHS[a.getMonth()]} ${a.getFullYear()}</h1><p>Beräknad på arbetade pass i perioden med lönegrupp, OB, mertid/övertid, frånvaro och arbetstidsförkortning. Klicka på en rad för lönespecifikation.</p></div>
+    <div class="toolbar"><input class="inp" style="width:auto" type="month" id="payMonth" value="${ym}" data-chg="payMonth" aria-label="Löneperiod"><button class="btn" data-act="expPay" data-k="pdf">PDF</button><button class="btn" data-act="expPay" data-k="xlsx">Excel</button></div></div>
+  <div class="kpis">
+    <div class="kpi"><span class="v">${num(tot('brutto')/1000,1)}k</span><span class="l">bruttolön totalt (kr)</span></div>
+    <div class="kpi"><span class="v">${num(tot('ord')+tot('extra'),0)}</span><span class="l">arbetade timmar</span></div>
+    <div class="kpi"><span class="v">${num(tot('obKr')/1000,1)}k</span><span class="l">OB-tillägg (kr)</span></div>
+    <div class="kpi"><span class="v">${num(tot('atfH'),1)}</span><span class="l">ATF intjänat (h)</span></div>
+  </div>
+  <div class="panel tbl-wrap"><table class="tbl"><thead><tr><th>Namn</th><th>Anställning</th><th class="n">Ord. tim</th><th class="n">Mertid/övertid</th><th class="n">OB-tim</th><th class="n">OB kr</th><th class="n">Frånvaro tim</th><th class="n">ATF tim</th><th class="n">Bruttolön</th></tr></thead><tbody>
+  ${res.map(p => `<tr class="click" data-act="spec" data-id="${p.emp.id}"><td><b>${esc(p.emp.name)}</b><div class="muted small">${esc(p.lg?.name||'')}</div></td><td class="small">${FORMS[p.emp.form].name}${p.hourly?'':' '+p.grad+' %'}</td><td class="n">${hrs(p.ord)}</td><td class="n">${p.extra?hrs(p.extra):'–'}</td><td class="n">${hrs(p.obH)}</td><td class="n">${kr(p.obKr)}</td><td class="n">${p.absTot?hrs(p.absTot):'–'}</td><td class="n">${hrs(p.atfH)}</td><td class="n"><b>${kr(p.brutto)}</b></td></tr>`).join('')}
+  <tr class="total"><td>Summa</td><td></td><td class="n">${hrs(tot('ord'))}</td><td class="n">${hrs(tot('extra'))}</td><td class="n">${hrs(tot('obH'))}</td><td class="n">${kr(tot('obKr'))}</td><td class="n">${hrs(tot('absTot'))}</td><td class="n">${hrs(tot('atfH'))}</td><td class="n">${kr(tot('brutto'))}</td></tr>
+  </tbody></table></div>
+  <p class="note" style="margin-top:12px">Förenklad bruttolöneberäkning före skatt. Belopp för lönegrupper, OB och ATF är exempelvärden och ska stämmas av mot gällande Bevakningsavtal under Inställningar. Semesterlön och semestertillägg för månadsavlönade beräknas inte.</p>`;
+};
+
+function specHtml(p, ym){
+  const ytd = atfYTD(p.emp, ym);
+  return `<div class="sect"><dl class="kv"><dt>Anställning</dt><dd>${FORMS[p.emp.form].name}${p.hourly?'':' · '+p.grad+' %'}</dd><dt>Lönegrupp</dt><dd>${esc(p.lg?.name||'–')} · månadslön ${kr(p.mlon)}</dd><dt>Timlön</dt><dd>${kr(p.tim)} (månadslön / ${D.settings.divisor})</dd><dt>ATF</dt><dd>${hrs(p.atfH)} h intjänat i perioden · ${hrs(ytd)} h hittills i år (${D.settings.atfMode==='saldo'?'till ledighetssaldo':'utbetalas'})</dd></dl></div>
+  <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Benämning</th><th class="n">Antal</th><th class="n">À-pris</th><th class="n">Belopp</th></tr></thead><tbody>
+    ${p.lines.map(l => `<tr><td>${esc(l.text)}</td><td class="n">${l.qty==null?'':hrs(l.qty)}</td><td class="n">${l.price==null?'':kr(l.price)}</td><td class="n">${kr(l.amount)}</td></tr>`).join('')}
+    <tr class="total"><td>Bruttolön</td><td></td><td></td><td class="n">${kr(p.brutto)}</td></tr></tbody></table></div>
+  <details><summary class="lbl" style="cursor:pointer">Pass i perioden (${p.shiftRows.length})</summary>
+  <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Datum</th><th>Pass</th><th>Tid</th><th>Typ</th><th class="n">Tim</th><th class="n">varav OB</th></tr></thead><tbody>
+    ${p.shiftRows.map(r => `<tr><td>${WD[wdIdx(r.o.start)]} ${fmtD(r.o.start)}</td><td>${esc(r.o.name)} <span class="muted small">${esc(siteById(r.o.siteId)?.name||'')}</span></td><td class="mono">${fmtT(r.o.start)}–${fmtT(r.o.end)}</td><td>${r.type}</td><td class="n">${hrs(r.h)}</td><td class="n">${hrs(r.obh)}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">Inga arbetade pass.</td></tr>'}</tbody></table></div></details>`;
+}
+
+VIEWS.settings = () => {
+  const S = D.settings, R = S.rules;
+  const nf = (id, val, step, label, hint) => `<div class="field"><label for="${id}">${label}</label><input id="${id}" type="number" step="${step||'any'}" value="${val}" data-chg="setting" data-path="${id}">${hint?`<span class="hint">${hint}</span>`:''}</div>`;
+  return `
+  <div class="page-head"><div><h1>Inställningar</h1><p>Avtalsvärden, arbetstidsregler och objekt. Ändringar sparas direkt och slår igenom i schema, regelkontroll och lön.</p></div></div>
+  <div class="note" style="margin-bottom:16px">Värdena är exempel för demo. Kontrollera lönegrupper, OB-belopp, övertidsdivisorer och arbetstidsförkortning mot det Bevakningsavtal som gäller för perioden innan lönen används skarpt.</div>
+  <div class="stack">
+  <section class="panel"><div class="panel-h"><h2>Lönegrupper</h2><button class="btn sm" data-act="addLg">+ Lönegrupp</button></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Kod</th><th>Benämning</th><th class="n">Månadslön (kr)</th><th class="n">Timlön</th><th>Anställda</th><th></th></tr></thead><tbody>
+    ${S.lonegrupper.map((g,i) => { const n = D.employees.filter(e=>e.lg===g.id).length; return `<tr><td class="mono">${esc(g.id)}</td><td><input class="inp" id="lgn${i}" value="${esc(g.name)}" data-chg="lg" data-i="${i}" data-f="name" aria-label="Benämning"></td><td class="n"><input class="inp" style="max-width:130px;text-align:right" type="number" id="lgs${i}" value="${g.salary}" data-chg="lg" data-i="${i}" data-f="salary" aria-label="Månadslön"></td><td class="n">${kr(g.salary/S.divisor)}</td><td>${n}</td><td>${n?'':`<button class="btn sm ghost" data-act="delLg" data-i="${i}">Ta bort</button>`}</td></tr>`; }).join('')}
+    </tbody></table></div></section>
+  <section class="panel"><div class="panel-h"><h2>OB-tillägg och arbetstidsförkortning</h2></div><div class="panel-b stack">
+    <div class="form">${Object.keys(OBCATS).map(c => nf('ob.'+c, S.ob[c], '0.01', 'OB '+OBCATS[c].toLowerCase()+' kr/h')).join('')}</div>
+    <div class="form">${Object.keys(OBCATS).map(c => nf('atf.'+c, S.atf[c], '0.1', 'ATF min per tim, '+c)).join('')}
+      <div class="field"><label for="atfMode">Arbetstidsförkortning</label><select id="atfMode" data-chg="setting" data-path="atfMode"><option value="saldo" ${S.atfMode==='saldo'?'selected':''}>Läggs som ledighet (saldo)</option><option value="utbetalning" ${S.atfMode==='utbetalning'?'selected':''}>Betalas ut som lön</option></select></div></div>
+    <p class="hint muted small" style="margin:0">Högsta tillämpliga OB-kategori gäller per minut: storhelg (påsk, midsommar, jul, nyår) före helg (lör–sön och övriga helgdagar), natt (22–06) och kväll (mån–fre 18–22).</p>
+  </div></section>
+  <section class="panel"><div class="panel-h"><h2>Lönefaktorer</h2></div><div class="panel-b"><div class="form">
+    ${nf('divisor', S.divisor, '1', 'Timlönedivisor', 'Timlön = månadslön / divisor')}
+    ${nf('otEnkel', S.otEnkel, '1', 'Övertid enkel, divisor', 'Per timme: månadslön / divisor')}
+    ${nf('otKval', S.otKval, '1', 'Övertid kvalificerad, divisor')}
+    ${nf('semErs', S.semErs, '0.1', 'Semesterersättning timavlönade %')}
+    ${nf('sickPct', S.sickPct, '1', 'Sjuklön %')}
+    ${nf('karensPct', S.karensPct, '1', 'Karensavdrag % av veckosjuklön')}
+  </div></div></section>
+  <section class="panel"><div class="panel-h"><h2>Arbetstidsregler</h2></div><div class="panel-b"><div class="form">
+    ${nf('rules.maxShift', R.maxShift, '0.5', 'Max passlängd (h)')}
+    ${nf('rules.minDailyRest', R.minDailyRest, '0.5', 'Dygnsvila (h per 24 h)', 'ATL 13 §: 11 h')}
+    ${nf('rules.minWeeklyRest', R.minWeeklyRest, '1', 'Veckovila (h per 7 dagar)', 'ATL 14 §: 36 h')}
+    ${nf('rules.maxAvgWeek', R.maxAvgWeek, '1', 'Max snitt h/vecka', 'ATL 10 b §: 48 h')}
+    ${nf('rules.avgWeeks', R.avgWeeks, '1', 'Snittperiod (veckor)')}
+    ${nf('rules.maxOtMonth', R.maxOtMonth, '1', 'Max övertid per månad (h)', 'ATL 8 §: 50 h')}
+  </div></div></section>
+  <section class="panel"><div class="panel-h"><h2>Objekt</h2><button class="btn sm" data-act="addSite">+ Objekt</button></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Namn</th><th>Adress</th><th>Pass</th><th></th></tr></thead><tbody>
+    ${D.sites.map((s,i) => { const n = D.series.filter(x=>x.siteId===s.id).length + D.singles.filter(x=>x.siteId===s.id).length; return `<tr><td><input class="inp" id="sn${i}" value="${esc(s.name)}" data-chg="site" data-i="${i}" data-f="name" aria-label="Objektets namn"></td><td><input class="inp" id="sa${i}" value="${esc(s.address||'')}" data-chg="site" data-i="${i}" data-f="address" aria-label="Adress"></td><td>${n}</td><td>${n?'':`<button class="btn sm ghost" data-act="delSite" data-i="${i}">Ta bort</button>`}</td></tr>`; }).join('')}
+    </tbody></table></div></section>
+  <section class="panel"><div class="panel-h"><h2>Data</h2></div><div class="panel-b stack">
+    <p class="muted" style="margin:0">All data ligger i den här webbläsarens lagring. Spara en säkerhetskopia innan du rensar webbläsaren eller byter dator.</p>
+    <div class="toolbar"><button class="btn" data-act="backup">Exportera säkerhetskopia (JSON)</button><label class="btn" for="importFile">Importera säkerhetskopia</label><input type="file" id="importFile" accept=".json,application/json" hidden data-chg="import"><button class="btn danger" data-act="askReset">Återställ demodata</button></div>
+    ${confirmBox('reset', 'All data ersätts med demodata. Det går inte att ångra.', 'Återställ', 'doReset')}
+  </div></section>
+  </div>`;
+};
+
+/* =========================================================
+   Vyer – personal
+   ========================================================= */
+VIEWS.mine = () => {
+  const e = me(); const t0 = today0(); const from = mondayOf(t0), to = addDays(from, 41);
+  const A = analyze(from, to); const mine = A.occs.filter(o => o.personId===e.id && o.status!=='cancelled');
+  const weeks = []; for (let w=0; w<6; w++){ const ws = addDays(from, w*7); weeks.push({ws, list: mine.filter(o => iso(mondayOf(o.start))===iso(ws))}); }
+  const absent = A.occs.filter(o => o.ordinaryId===e.id && o.personId!==e.id && o.status!=='cancelled');
+  return `
+  <div class="page-head"><div><div class="eyebrow">${esc(e.name)} · ${FORMS[e.form].name}${FORMS[e.form].pay==='hour'?'':' '+e.grad+' %'}</div><h1>Mitt schema</h1><p>Dina pass de kommande sex veckorna.</p></div>
+    <div class="toolbar"><button class="btn" data-act="expMine" data-k="pdf">PDF</button><button class="btn" data-act="expMine" data-k="xlsx">Excel</button></div></div>
+  <div class="stack">${weeks.map(w => `<section class="panel"><div class="panel-h"><h2>Vecka ${isoWeek(w.ws)}</h2><span class="muted small">${fmtD(w.ws)} – ${fmtD(addDays(w.ws,6))} · ${hrs(w.list.reduce((a,o)=>a+hoursOf(o),0))} h</span></div>
+    <div class="list">${w.list.map(o => { const is = A.byOcc.get(o.id)||[]; return `<div class="item"><div class="main-t"><b>${WD[wdIdx(o.start)]} ${fmtD(o.start)}</b> <span class="mono">${fmtT(o.start)}–${fmtT(o.end)}</span> · ${esc(o.name)} <div class="meta">${esc(siteById(o.siteId)?.name||'')} · ${hrs(hoursOf(o))} h${holiday(o.start)?' · '+esc(holiday(o.start).name):''}</div>${issuesHtml(is)}</div>${statusPill(o)}</div>`; }).join('') || '<div class="empty">Inga pass.</div>'}</div></section>`).join('')}
+  ${absent.length ? `<section class="panel"><div class="panel-h"><h2>Ordinarie pass du inte går</h2></div><div class="list">${absent.map(o => `<div class="item"><div class="main-t"><b>${WD[wdIdx(o.start)]} ${fmtD(o.start)}</b> <span class="mono">${fmtT(o.start)}–${fmtT(o.end)}</span> · ${esc(o.name)}<div class="meta">${o.absence?ABS[o.absence]:'Omplanerat'}${o.personId?' · går: '+esc(empName(o.personId)):''}</div></div>${statusPill(o)}</div>`).join('')}</div></section>`:''}
+  </div>`;
+};
+VIEWS.openshifts = () => {
+  const e = me(); const t0 = today0(); const A = analyze(t0, addDays(t0, 55));
+  const open = A.occs.filter(o => o.status==='open');
+  return `
+  <div class="page-head"><div><h1>Lediga pass</h1><p>Pass som arbetsledningen har lagt ut. Bokningen kontrolleras mot dygnsvila, veckovila och dina övriga pass innan den genomförs.</p></div></div>
+  <section class="panel"><div class="list">${open.map(o => {
+    const chk = UI.bookCheck && UI.bookCheck.id===o.id ? UI.bookCheck : null;
+    const hasErr = chk && chk.issues.some(i=>i.level==='error');
+    return `<div class="item"><div class="main-t"><b>${WD[wdIdx(o.start)]} ${fmtD(o.start)}</b> <span class="mono">${fmtT(o.start)}–${fmtT(o.end)}</span> · ${esc(o.name)}<div class="meta">${esc(siteById(o.siteId)?.name||'')} · ${hrs(hoursOf(o))} h${o.requires?' · kräver '+CERTS[o.requires]:''}${holiday(o.start)?' · '+esc(holiday(o.start).name):''}</div>
+      ${chk ? issuesHtml(chk.issues, 'Inga hinder. Du kan boka passet.') : ''}
+      ${chk ? `<div class="toolbar">${hasErr ? '<span class="muted small">Passet kan inte bokas eftersom det bryter mot arbetstidsreglerna.</span>' : `<button class="btn primary sm" data-act="book" data-id="${esc(o.id)}">Bekräfta bokning</button>`}<button class="btn sm" data-act="bookCancel">Avbryt</button></div>` : ''}</div>
+      ${chk ? '' : `<button class="btn primary sm" data-act="bookCheck" data-id="${esc(o.id)}">Boka</button>`}</div>`; }).join('') || '<div class="empty">Det finns inga lediga pass just nu.</div>'}</div></section>`;
+};
+VIEWS.mypay = () => {
+  const e = me(); const ym = UI.myMonth || UI.payMonth; const p = calcPay(e, ym); const [a] = monthRange(ym);
+  return `
+  <div class="page-head"><div><div class="eyebrow">${esc(e.name)}</div><h1>Min lön ${MONTHS[a.getMonth()]} ${a.getFullYear()}</h1><p>Preliminär lönespecifikation utifrån dina pass. Slutlig lön fastställs av arbetsgivaren.</p></div>
+    <div class="toolbar"><input class="inp" style="width:auto" type="month" id="myMonth" value="${ym}" data-chg="myMonth" aria-label="Löneperiod"><button class="btn" data-act="expSpec" data-id="${e.id}" data-ym="${ym}">PDF</button></div></div>
+  <section class="panel"><div class="panel-b stack">${specHtml(p, ym)}</div></section>`;
+};
+
+/* =========================================================
+   Dialoger
+   ========================================================= */
+function shiftDialog(id){
+  UI.selCand = null;
+  showModal(() => {
+    const o = getOcc(id); if (!o) return `<div class="dlg-b">Passet finns inte längre.</div><div class="dlg-f"><button class="btn" data-act="closeModal">Stäng</button></div>`;
+    const pool = occurrences(addDays(o.start,-35), addDays(o.start,35));
+    const cur = o.personId ? simulate(o, o.personId, pool) : [];
+    const cands = D.employees.map(e => ({e, is: simulate(o, e.id, pool)}));
+    const sel = UI.selCand || '';
+    const selC = cands.find(c => c.e.id===sel);
+    const site = siteById(o.siteId);
+    const tag = c => { const w = worst(c.is); return w==='error' ? 'bryter mot regel' : w ? `${c.is.length} varning${c.is.length>1?'ar':''}` : 'OK'; };
+    const force = UI.pendingForce === o.id+'|'+sel;
+    return `
+    <div class="dlg-h"><div><div class="eyebrow">${esc(site?.name||'')}${o.kind==='single'?' · extrapass':''}</div><h2>${esc(o.name)} · ${fmtLong(o.start)}</h2><div class="mono">${fmtT(o.start)}–${fmtT(o.end)} · ${hrs(hoursOf(o))} h${o.breakMin?` (rast ${o.breakMin} min)`:''}</div></div><button class="btn ghost" data-act="closeModal" aria-label="Stäng">✕</button></div>
+    <div class="dlg-b">
+      <dl class="kv"><dt>Status</dt><dd>${statusPill(o)}</dd>${o.kind==='series'?`<dt>Ordinarie</dt><dd>${o.ordinaryId?esc(empName(o.ordinaryId)):'Ingen'}</dd>`:''}<dt>Bemannas av</dt><dd>${o.personId?esc(empName(o.personId)):'–'}</dd>${o.absence?`<dt>Frånvaro</dt><dd>${ABS[o.absence]}</dd>`:''}${o.requires?`<dt>Krav</dt><dd>${CERTS[o.requires]}</dd>`:''}${holiday(o.start)?`<dt>Helgdag</dt><dd>${esc(holiday(o.start).name)}</dd>`:''}</dl>
+      ${o.personId ? issuesHtml(cur, 'Inga regelbrott för nuvarande bemanning.') : ''}
+      ${o.status!=='cancelled' ? `
+      <div class="sect"><span class="lbl">Tilldela personal</span>
+        <div class="toolbar"><select class="inp" style="flex:1 1 260px;width:auto" id="cand" data-chg="cand"><option value="">Välj person…</option>${cands.map(c => `<option value="${c.e.id}" ${c.e.id===sel?'selected':''} ${c.e.id===o.personId?'disabled':''}>${esc(c.e.name)} — ${tag(c)}</option>`).join('')}</select>
+        <button class="btn primary" data-act="assign" data-id="${esc(o.id)}" ${sel?'':'disabled'}>Tilldela</button></div>
+        ${selC ? issuesHtml(selC.is, `${esc(selC.e.name)} kan ta passet utan regelbrott.`) : ''}
+        ${force ? `<div class="inline-confirm"><div>Tilldelningen bryter mot arbetstidsreglerna. Tilldela ändå?</div><div class="toolbar"><button class="btn danger" data-act="assign" data-id="${esc(o.id)}" data-force="1">Tilldela ändå</button></div></div>`:''}
+      </div>
+      <div class="sect"><span class="lbl">Frånvaro och vakans</span>
+        <div class="toolbar">${o.kind==='series'?`<select class="inp" style="width:auto" id="absReason" aria-label="Orsak">${Object.entries(ABS).map(([k,v]) => `<option value="${k}" ${o.absence===k?'selected':''}>${v}</option>`).join('')}</select>`:''}
+        <button class="btn" data-act="makeVacant" data-id="${esc(o.id)}">Gör vakant</button><button class="btn" data-act="makeOpen" data-id="${esc(o.id)}">Lägg ut som fritt pass</button></div>
+        ${o.kind==='series'?'<span class="hint muted small">Orsaken påverkar ordinarie persons lön (sjukavdrag, tjänstledighet m.m.).</span>':''}
+      </div>`:''}
+    </div>
+    <div class="dlg-f">
+      ${o.overridden?`<button class="btn" data-act="restore" data-id="${esc(o.id)}">Återställ till ordinarie</button>`:''}
+      ${o.status==='cancelled'?`<button class="btn" data-act="uncancel" data-id="${esc(o.id)}">Återaktivera pass</button>`:`<button class="btn" data-act="cancelOcc" data-id="${esc(o.id)}">Ställ in passet</button>`}
+      ${o.kind==='single'?`<button class="btn danger" data-act="delSingle" data-id="${esc(o.id)}">Ta bort extrapass</button>`:''}
+      <button class="btn" data-act="closeModal">Stäng</button>
+    </div>`;
+  });
+}
+
+function parseDays(txt){
+  const names = ['mån','tis','ons','tor','fre','lör','sön'];
+  const re = /(mån|tis|ons|tor|fre|lör|sön)[a-zåäö]*(?:\s*[-–]\s*(mån|tis|ons|tor|fre|lör|sön)[a-zåäö]*)?/g;
+  const out = new Set(); let m;
+  while ((m = re.exec(txt))){ const a = names.indexOf(m[1]); const b = m[2] ? names.indexOf(m[2]) : a; let i = a; for (let k=0;k<7;k++){ out.add(i); if (i===b) break; i = (i+1)%7; } }
+  return [...out].sort((a,b)=>a-b);
+}
+function parsePattern(txt){
+  const t = txt.toLowerCase();
+  const m = t.match(/(\d{1,2})(?:[:.](\d{2}))?\s*[-–]\s*(\d{1,2})(?:[:.](\d{2}))?/);
+  if (!m) return null;
+  const from = pad(+m[1]%24)+':'+(m[2]||'00'), to = pad(+m[3]%24)+':'+(m[4]||'00');
+  const rest = t.replace(/\d{1,2}(?:[:.]\d{2})?\s*[-–]\s*\d{1,2}(?:[:.]\d{2})?/g,' ');
+  let weeks = rest.split(/\||;|\bvecka\s*2\b|\bv2\b|\boch sedan\b/).map(parseDays).filter(w=>w.length);
+  let cycle = weeks.length || 1;
+  if (/varannan/.test(t) && cycle < 2) cycle = 2;
+  if (/var tredje/.test(t) && cycle < 3) cycle = 3;
+  if (/var fjärde/.test(t) && cycle < 4) cycle = 4;
+  const days = Array.from({length:cycle}, (_,i)=>weeks[i]||[]);
+  return {from, to, cycle, days};
+}
+function seriesDialog(id){
+  const s = id ? seriesById(id) : null;
+  const t0 = today0();
+  UI.draft = s ? JSON.parse(JSON.stringify(s)) : {id:'', name:'', siteId:D.sites[0]?.id||'', from:'18:00', to:'06:00', breakMin:0, cycle:2, days:[[0,1,4,5,6],[2,3]], start:iso(mondayOf(t0)), end:'', personId:'', requires:'vaktare'};
+  showModal(() => {
+    const d = UI.draft; const c = Math.max(1,d.cycle|0);
+    while (d.days.length < c) d.days.push([]);
+    const anchor = d.start ? mondayOf(parseISO(d.start)) : mondayOf(t0);
+    const prevFrom = d.start && parseISO(d.start) > t0 ? parseISO(d.start) : t0;
+    const prev = []; for (let x = new Date(prevFrom), i=0; i<28 && prev.length<10; i++, x = addDays(x,1)) if (d.start && seriesOccursOn(d, x)) prev.push(x);
+    const wh = seriesWeekHours(d);
+    const pEmp = empById(d.personId);
+    const capH = pEmp && FORMS[pEmp.form].pay==='month' ? 40*(pEmp.grad||0)/100 : null;
+    return `
+    <div class="dlg-h"><div><div class="eyebrow">${s?'Redigera':'Nytt'} löpande pass</div><h2>${esc(d.name||'Namnlöst pass')}</h2></div><button class="btn ghost" data-act="closeModal" aria-label="Stäng">✕</button></div>
+    <div class="dlg-b">
+      <div class="sect"><span class="lbl">Snabbval</span><div class="presets">
+        <button class="btn sm" data-act="preset" data-p="223n">Natt 18–06, 2-2-3 (varannan vecka)</button>
+        <button class="btn sm" data-act="preset" data-p="223d">Dag 06–18, 2-2-3 (varannan vecka)</button>
+        <button class="btn sm" data-act="preset" data-p="kontor">Kontor 08–17 mån–fre varje vecka</button></div>
+        <div class="toolbar"><input class="inp" style="flex:1 1 280px;width:auto" id="ptxt" placeholder="T.ex. 18-06 mån-tis fre-sön | ons-tors" aria-label="Skriv mönster"><button class="btn sm" data-act="parsePattern">Tolka</button></div>
+        <span class="hint muted small">Skriv tid och dagar. Skilj veckorna i cykeln med | (lodstreck).</span></div>
+      <div class="form">
+        <div class="field"><label for="dName">Namn</label><input id="dName" value="${esc(d.name)}" data-chg="draft" placeholder="t.ex. Natt A"></div>
+        <div class="field"><label for="dSite">Objekt</label><select id="dSite" data-chg="draft">${D.sites.map(x=>`<option value="${x.id}" ${x.id===d.siteId?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
+        <div class="field"><label for="dFrom">Starttid</label><input id="dFrom" type="time" value="${d.from}" data-chg="draft"></div>
+        <div class="field"><label for="dTo">Sluttid</label><input id="dTo" type="time" value="${d.to}" data-chg="draft"><span class="hint">Tidigare än start = slutar nästa dygn</span></div>
+        <div class="field"><label for="dBreak">Obetald rast (min)</label><input id="dBreak" type="number" min="0" step="5" value="${d.breakMin||0}" data-chg="draft"></div>
+        <div class="field"><label for="dReq">Behörighetskrav</label><select id="dReq" data-chg="draft"><option value="">Inget</option>${Object.entries(CERTS).map(([k,v])=>`<option value="${k}" ${d.requires===k?'selected':''}>${v}</option>`).join('')}</select></div>
+        <div class="field"><label for="dStart">Gäller från</label><input id="dStart" type="date" value="${d.start}" data-chg="draft"><span class="hint">Cykelns vecka 1 = v.${isoWeek(anchor)}</span></div>
+        <div class="field"><label for="dEnd">Gäller till</label><input id="dEnd" type="date" value="${d.end||''}" data-chg="draft"><span class="hint">Tomt = tills vidare</span></div>
+        <div class="field"><label for="dCycle">Upprepning</label><select id="dCycle" data-chg="draft">${[[1,'Varje vecka'],[2,'Varannan vecka (2-veckorscykel)'],[3,'3-veckorscykel'],[4,'4-veckorscykel'],[6,'6-veckorscykel']].map(([v,l])=>`<option value="${v}" ${c===v?'selected':''}>${l}</option>`).join('')}</select></div>
+        <div class="field"><label for="dPerson">Ordinarie person</label><select id="dPerson" data-chg="draft">${empOptions(d.personId, true, '— Ingen (passen blir vakanta) —')}</select></div>
+      </div>
+      <div class="sect"><span class="lbl">Dagar i cykeln</span>
+        <div class="tbl-wrap"><table class="matrix"><thead><tr><th></th>${WD.map(w=>`<th>${w}</th>`).join('')}</tr></thead><tbody>
+        ${Array.from({length:c}, (_,w) => `<tr><td>Vecka ${w+1}${c>1?` <span class="muted small">(v.${isoWeek(addDays(anchor,7*w))}, v.${isoWeek(addDays(anchor,7*(w+c)))} …)</span>`:''}</td>${WD.map((_,i)=>`<td><input type="checkbox" id="dd${w}_${i}" aria-label="Vecka ${w+1} ${WD_LONG[i]}" data-chg="draftDay" data-w="${w}" data-d="${i}" ${(d.days[w]||[]).includes(i)?'checked':''}></td>`).join('')}</tr>`).join('')}
+        </tbody></table></div>
+        <div class="note"><b>${esc(patternText(d))}</b> · i snitt ${hrs(wh)} h/vecka${capH!=null?` · ordinarie personens grad motsvarar ${hrs(capH)} h/vecka`:''}<br>Nästa pass: ${prev.map(x=>`${WD[wdIdx(x)]} ${fmtD(x)}`).join(', ') || 'inga inom 4 veckor'}</div>
+      </div>
+      ${UI.formErr?`<div class="issues-box"><div class="row err">${esc(UI.formErr)}</div></div>`:''}
+    </div>
+    <div class="dlg-f">${s?`<button class="btn danger" data-act="askDelSeries" data-id="${s.id}">Ta bort</button>`:''}<button class="btn" data-act="closeModal">Avbryt</button><button class="btn primary" data-act="saveSeries">Spara</button></div>`;
+  }, true);
+}
+function syncDraft(){
+  const d = UI.draft; if (!d) return; const v = id => { const el = document.getElementById(id); return el ? el.value : undefined; };
+  d.name = v('dName') ?? d.name; d.siteId = v('dSite') ?? d.siteId; d.from = v('dFrom') || d.from; d.to = v('dTo') || d.to;
+  d.breakMin = Math.max(0, +(v('dBreak') ?? d.breakMin) || 0); d.requires = v('dReq') ?? d.requires; d.start = v('dStart') ?? d.start; d.end = v('dEnd') ?? d.end;
+  d.cycle = +(v('dCycle') ?? d.cycle) || 1; d.personId = v('dPerson') ?? d.personId;
+}
+
+function singleDialog(){
+  const t0 = today0();
+  showModal(() => `
+    <div class="dlg-h"><div><div class="eyebrow">Enstaka pass</div><h2>Nytt extrapass</h2></div><button class="btn ghost" data-act="closeModal" aria-label="Stäng">✕</button></div>
+    <div class="dlg-b"><div class="form">
+      <div class="field"><label for="xName">Namn</label><input id="xName" value="" placeholder="t.ex. Arena: match"></div>
+      <div class="field"><label for="xSite">Objekt</label><select id="xSite">${D.sites.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select></div>
+      <div class="field"><label for="xDate">Datum</label><input id="xDate" type="date" value="${iso(addDays(t0,1))}"></div>
+      <div class="field"><label for="xFrom">Starttid</label><input id="xFrom" type="time" value="18:00"></div>
+      <div class="field"><label for="xTo">Sluttid</label><input id="xTo" type="time" value="23:00"></div>
+      <div class="field"><label for="xBreak">Obetald rast (min)</label><input id="xBreak" type="number" min="0" step="5" value="0"></div>
+      <div class="field"><label for="xReq">Behörighetskrav</label><select id="xReq"><option value="">Inget</option>${Object.entries(CERTS).map(([k,v])=>`<option value="${k}" ${k==='vaktare'?'selected':''}>${v}</option>`).join('')}</select></div>
+      <div class="field"><label for="xCount">Antal pass</label><input id="xCount" type="number" min="1" max="20" value="1"></div>
+      <div class="field"><label for="xMode">Bemanning</label><select id="xMode"><option value="open">Lägg ut som fritt att boka</option><option value="vacant">Vakant (tilldelas senare)</option>${D.employees.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select></div>
+    </div>${UI.formErr?`<div class="issues-box"><div class="row err">${esc(UI.formErr)}</div></div>`:''}</div>
+    <div class="dlg-f"><button class="btn" data-act="closeModal">Avbryt</button><button class="btn primary" data-act="saveSingle">Skapa</button></div>`);
+}
+
+function empDialog(id){
+  const e = id ? empById(id) : {id:'', name:'', role:'personal', form:'tv', grad:100, lg:D.settings.lonegrupper[0]?.id, certs:['vaktare'], start:iso(today0()), end:'', phone:'', email:''};
+  UI.empForm = e.form;
+  showModal(() => {
+    const form = UI.empForm; const F = FORMS[form];
+    const ser = id ? D.series.filter(s=>s.personId===id) : [];
+    return `
+    <div class="dlg-h"><div><div class="eyebrow">${id?'Redigera':'Ny'} personal</div><h2>${esc(e.name||'Ny anställd')}</h2></div><button class="btn ghost" data-act="closeModal" aria-label="Stäng">✕</button></div>
+    <div class="dlg-b"><div class="form">
+      <div class="field"><label for="eName">Namn</label><input id="eName" value="${esc(e.name)}"></div>
+      <div class="field"><label for="eRole">Roll</label><select id="eRole"><option value="personal" ${e.role==='personal'?'selected':''}>Personal</option><option value="arbetsledare" ${e.role==='arbetsledare'?'selected':''}>Arbetsledare</option></select></div>
+      <div class="field"><label for="eForm">Anställningsform</label><select id="eForm" data-chg="empForm">${Object.entries(FORMS).map(([k,v])=>`<option value="${k}" ${form===k?'selected':''}>${v.name}</option>`).join('')}</select>
+        <span class="hint">${form==='prov'?'Högst 6 månader, övergår annars i tillsvidareanställning.':form==='behov'?'Arbetar vid behov, timlön och semesterersättning.':form==='sv'?'Särskild visstidsanställning, LAS 5 §.':F.needsEnd?'Tidsbegränsad: ange slutdatum.':'Gäller tills vidare.'}</span></div>
+      <div class="field"><label for="eGrad">Sysselsättningsgrad %</label><input id="eGrad" type="number" min="0" max="100" step="5" value="${F.pay==='hour'?0:e.grad}" ${F.pay==='hour'?'disabled':''}><span class="hint">100 = heltid, under 100 = deltid</span></div>
+      <div class="field"><label for="eLg">Lönegrupp</label><select id="eLg">${D.settings.lonegrupper.map(g=>`<option value="${g.id}" ${g.id===e.lg?'selected':''}>${esc(g.name)} (${num(g.salary,0)} kr)</option>`).join('')}</select></div>
+      <div class="field"><span class="lbl">Behörighet</span><div class="checks">${Object.entries(CERTS).map(([k,v])=>`<label><input type="checkbox" id="ec_${k}" ${(e.certs||[]).includes(k)?'checked':''}>${v}</label>`).join('')}</div></div>
+      <div class="field"><label for="eStart">Anställd från</label><input id="eStart" type="date" value="${e.start||''}"></div>
+      <div class="field"><label for="eEnd">Anställd till</label><input id="eEnd" type="date" value="${e.end||''}"><span class="hint">${F.needsEnd?'Krävs för tidsbegränsad anställning':'Lämna tomt'}</span></div>
+      <div class="field"><label for="ePhone">Telefon</label><input id="ePhone" value="${esc(e.phone||'')}"></div>
+      <div class="field"><label for="eEmail">E-post</label><input id="eEmail" type="email" value="${esc(e.email||'')}"></div>
+    </div>
+    ${ser.length?`<div class="note">Ordinarie på: ${ser.map(s=>`${esc(s.name)} (${esc(siteById(s.siteId)?.name||'')})`).join(', ')}</div>`:''}
+    ${UI.formErr?`<div class="issues-box"><div class="row err">${esc(UI.formErr)}</div></div>`:''}
+    ${id ? confirmBox('delEmp:'+id, `Ta bort <b>${esc(e.name)}</b>? Ordinarie pass och tilldelade pass blir vakanta.`, 'Ta bort', 'delEmp', `data-id="${id}"`) : ''}
+    </div>
+    <div class="dlg-f">${id?`<button class="btn danger" data-act="askDelEmp" data-id="${id}">Ta bort</button>`:''}<button class="btn" data-act="closeModal">Avbryt</button><button class="btn primary" data-act="saveEmp" data-id="${id||''}">Spara</button></div>`;
+  });
+}
+
+/* =========================================================
+   Händelser
+   ========================================================= */
+const ACT = {
+  nav: d => { UI.view = d.v; UI.confirm = null; UI.bookCheck = null; render(); window.scrollTo(0,0); },
+  closeModal: () => { UI.formErr = null; UI.confirm = null; closeModal(); },
+  shift: d => shiftDialog(d.id),
+  schedNav: d => { const n = +d.d; UI.schedStart = n===0 ? mondayOf(today0()) : addDays(UI.schedStart, n*7*UI.schedWeeks); render(); },
+  schedWeeks: d => { UI.schedWeeks = +d.w; render(); },
+  schedMode: d => { UI.schedMode = d.m; render(); },
+  ruleWeeks: d => { UI.ruleWeeks = +d.w; render(); },
+  expSched: d => exportSchedule(d.k, UI.schedStart, addDays(UI.schedStart, UI.schedWeeks*7-1)),
+  expMine: d => { const f = mondayOf(today0()); exportSchedule(d.k, f, addDays(f,41), me().id); },
+  expPay: d => exportPayroll(d.k, UI.payMonth),
+  expSpec: d => exportPayroll('pdf', d.ym, d.id),
+  expStaff: d => exportStaff(d.k),
+  assign: d => {
+    const o = getOcc(d.id); const pid = UI.selCand; if (!o || !pid) return;
+    const is = simulate(o, pid);
+    if (is.some(i=>i.level==='error') && !d.force){ UI.pendingForce = o.id+'|'+pid; refreshModal(); return; }
+    setOcc(o, {personId:pid, open:false, cancelled:false});
+    UI.pendingForce = null; closeModal(); render(); toast(`${empName(pid)} tilldelad ${o.name} ${fmtD(o.start)}`);
+  },
+  makeVacant: d => { const o = getOcc(d.id); const r = document.getElementById('absReason'); const patch = {personId:null, open:false}; if (r && o.kind==='series') patch.absence = r.value; setOcc(o, patch); closeModal(); render(); toast('Passet är vakant'); },
+  makeOpen: d => { const o = getOcc(d.id); const r = document.getElementById('absReason'); const patch = {personId:null, open:true}; if (r && o.kind==='series') patch.absence = r.value; setOcc(o, patch); closeModal(); render(); toast('Passet är utlagt som fritt att boka'); },
+  setOpen: d => { const o = getOcc(d.id); setOcc(o, {personId:null, open:true}); render(); toast('Utlagt som fritt pass'); },
+  setVacant: d => { const o = getOcc(d.id); setOcc(o, {personId:null, open:false}); render(); toast('Passet är tillbakadraget'); },
+  openAll: () => { const t0 = today0(); analyze(t0, addDays(t0,55)).occs.filter(o=>o.status==='vacant').forEach(o => setOcc(o, {personId:null, open:true})); render(); toast('Alla vakanta pass är utlagda'); },
+  restore: d => { const o = getOcc(d.id); delete D.overrides[o.id]; save(); closeModal(); render(); toast('Återställt till ordinarie'); },
+  cancelOcc: d => { const o = getOcc(d.id); setOcc(o, {cancelled:true}); closeModal(); render(); toast('Passet är inställt'); },
+  uncancel: d => { const o = getOcc(d.id); setOcc(o, {cancelled:false}); if (o.kind==='series'){ const ov = D.overrides[o.id]; if (ov && !('personId' in ov) && !ov.absence && !ov.open) delete D.overrides[o.id]; save(); } closeModal(); render(); },
+  delSingle: d => { const o = getOcc(d.id); D.singles = D.singles.filter(s => s.id!==o.singleId); save(); closeModal(); render(); toast('Extrapasset är borttaget'); },
+  newSeries: () => { UI.formErr = null; seriesDialog(null); },
+  editSeries: d => { UI.formErr = null; seriesDialog(d.id); },
+  newSingle: () => { UI.formErr = null; singleDialog(); },
+  preset: d => { syncDraft(); const P = {'223n':{from:'18:00',to:'06:00',cycle:2,days:[[0,1,4,5,6],[2,3]],breakMin:0}, '223d':{from:'06:00',to:'18:00',cycle:2,days:[[0,1,4,5,6],[2,3]],breakMin:0}, 'kontor':{from:'08:00',to:'17:00',cycle:1,days:[[0,1,2,3,4]],breakMin:60}}[d.p]; Object.assign(UI.draft, JSON.parse(JSON.stringify(P))); refreshModal(); },
+  parsePattern: () => { const txt = document.getElementById('ptxt').value; syncDraft(); const p = parsePattern(txt); if (!p){ UI.formErr = 'Hittade ingen tid. Skriv t.ex. "18-06 mån-tis fre-sön | ons-tors".'; } else { UI.formErr = null; Object.assign(UI.draft, p); } refreshModal(); },
+  saveSeries: () => {
+    syncDraft(); const d = UI.draft;
+    if (!d.name.trim()) { UI.formErr = 'Ge passet ett namn.'; return refreshModal(); }
+    if (!d.start) { UI.formErr = 'Ange från vilket datum passet gäller.'; return refreshModal(); }
+    d.days = d.days.slice(0, d.cycle);
+    if (!d.days.some(w=>w.length)) { UI.formErr = 'Välj minst en dag i cykeln.'; return refreshModal(); }
+    if (d.end && d.end < d.start) { UI.formErr = 'Slutdatum ligger före startdatum.'; return refreshModal(); }
+    d.personId = d.personId || null; d.name = d.name.trim();
+    if (d.id){ const i = D.series.findIndex(s=>s.id===d.id); D.series[i] = d; } else { d.id = uid('p'); D.series.push(d); }
+    save(); UI.formErr = null; closeModal(); render(); toast('Löpande pass sparat');
+  },
+  askDelSeries: d => { closeModal(); UI.view = 'series'; UI.confirm = 'delSeries:'+d.id; render(); },
+  delSeries: d => { D.series = D.series.filter(s=>s.id!==d.id); for (const k of Object.keys(D.overrides)) if (k.startsWith(d.id+'@')) delete D.overrides[k]; UI.confirm = null; save(); render(); toast('Löpande pass borttaget'); },
+  confirmCancel: () => { UI.confirm = null; if (UI.modal) refreshModal(); render(); },
+  saveSingle: () => {
+    const v = id => document.getElementById(id).value;
+    const name = v('xName').trim(), date = v('xDate'), mode = v('xMode'), n = Math.min(20, Math.max(1, +v('xCount')||1));
+    if (!name) { UI.formErr = 'Ge passet ett namn.'; return refreshModal(); }
+    if (!date) { UI.formErr = 'Välj datum.'; return refreshModal(); }
+    for (let i=0;i<n;i++) D.singles.push({id:uid('x'), date, from:v('xFrom'), to:v('xTo'), siteId:v('xSite'), name, personId: (mode==='open'||mode==='vacant') ? null : (i===0?mode:null), open: mode==='open' || (mode!=='vacant' && i>0), cancelled:false, breakMin:+v('xBreak')||0, requires:v('xReq')});
+    save(); UI.formErr = null; closeModal(); render(); toast(n>1 ? `${n} extrapass skapade` : 'Extrapass skapat');
+  },
+  editEmp: d => { UI.formErr = null; UI.confirm = null; empDialog(d.id); },
+  saveEmp: d => {
+    const v = id => document.getElementById(id).value;
+    const form = v('eForm'), F = FORMS[form];
+    const e = d.id ? empById(d.id) : {id:uid('e')};
+    const rec = {name:v('eName').trim(), role:v('eRole'), form, grad: F.pay==='hour' ? 0 : Math.min(100, Math.max(0, +v('eGrad')||0)), lg:v('eLg'), certs:Object.keys(CERTS).filter(k=>document.getElementById('ec_'+k).checked), start:v('eStart'), end:v('eEnd'), phone:v('ePhone').trim(), email:v('eEmail').trim()};
+    let err = null;
+    if (!rec.name) err = 'Ange namn.';
+    else if (F.needsEnd && !rec.end) err = `${F.name} kräver ett slutdatum.`;
+    else if (rec.end && rec.start && rec.end < rec.start) err = 'Slutdatum ligger före startdatum.';
+    else if (form==='prov' && rec.start && rec.end){ const s = parseISO(rec.start); const max = addDays(new Date(s.getFullYear(), s.getMonth()+6, s.getDate()), -1); if (parseISO(rec.end) > max) err = `Provanställning får vara högst 6 månader (senast ${iso(max)}).`; }
+    else if (F.pay==='month' && rec.grad <= 0) err = 'Månadsavlönad anställning behöver en sysselsättningsgrad över 0 %.';
+    if (!rec.role || (d.id===UI.user && rec.role!=='arbetsledare' && !D.employees.some(x=>x.id!==d.id && x.role==='arbetsledare'))) err = err || 'Det måste finnas minst en arbetsledare.';
+    if (err){ UI.formErr = err; return refreshModal(); }
+    Object.assign(e, rec); if (!d.id) D.employees.push(e);
+    save(); UI.formErr = null; closeModal(); render(); toast('Personal sparad');
+  },
+  askDelEmp: d => { if (D.employees.length<=1) return; UI.confirm = 'delEmp:'+d.id; refreshModal(); },
+  delEmp: d => {
+    if (d.id===UI.user || (empById(d.id).role==='arbetsledare' && D.employees.filter(e=>e.role==='arbetsledare').length<=1)){ UI.formErr = 'Du kan inte ta bort dig själv eller den sista arbetsledaren.'; UI.confirm = null; return refreshModal(); }
+    D.employees = D.employees.filter(e=>e.id!==d.id);
+    D.series.forEach(s => { if (s.personId===d.id) s.personId = null; });
+    D.singles.forEach(s => { if (s.personId===d.id) s.personId = null; });
+    for (const o of Object.values(D.overrides)) if (o.personId===d.id) o.personId = null;
+    UI.confirm = null; save(); closeModal(); render(); toast('Personal borttagen');
+  },
+  spec: d => { const e = empById(d.id); const p = calcPay(e, UI.payMonth); const [a] = monthRange(UI.payMonth);
+    showModal(() => `<div class="dlg-h"><div><div class="eyebrow">Lönespecifikation · ${MONTHS[a.getMonth()]} ${a.getFullYear()}</div><h2>${esc(e.name)}</h2></div><button class="btn ghost" data-act="closeModal" aria-label="Stäng">✕</button></div><div class="dlg-b">${specHtml(p, UI.payMonth)}</div><div class="dlg-f"><button class="btn" data-act="expSpec" data-id="${e.id}" data-ym="${UI.payMonth}">PDF</button><button class="btn" data-act="closeModal">Stäng</button></div>`, true); },
+  bookCheck: d => { const o = getOcc(d.id); UI.bookCheck = {id:d.id, issues: simulate(o, me().id)}; render(); },
+  bookCancel: () => { UI.bookCheck = null; render(); },
+  book: d => { const o = getOcc(d.id); if (!o || o.status!=='open'){ toast('Passet är inte längre ledigt.'); UI.bookCheck = null; return render(); }
+    const is = simulate(o, me().id); if (is.some(i=>i.level==='error')) { UI.bookCheck = {id:d.id, issues:is}; return render(); }
+    setOcc(o, {personId: me().id, open:false}); UI.bookCheck = null; render(); toast(`Du har bokat ${o.name} ${fmtD(o.start)}`); },
+  addLg: () => { const n = D.settings.lonegrupper.length+1; let id = 'G'+n; while (D.settings.lonegrupper.some(g=>g.id===id)) id += 'b'; D.settings.lonegrupper.push({id, name:'Ny lönegrupp', salary:28000}); save(); render(); },
+  delLg: d => { D.settings.lonegrupper.splice(+d.i,1); save(); render(); },
+  addSite: () => { D.sites.push({id:uid('s'), name:'Nytt objekt', address:''}); save(); render(); },
+  delSite: d => { D.sites.splice(+d.i,1); save(); render(); },
+  backup: () => offerFile(`vaktplan-backup-${iso(new Date())}.json`, new Blob([JSON.stringify(D,null,2)], {type:'application/json'})),
+  askReset: () => { UI.confirm = 'reset'; render(); },
+  doReset: () => { D = seed(); UI.confirm = null; UI.user = 'e1'; save(); render(); toast('Demodata återställd'); },
+};
+const CHG = {
+  who: el => { UI.user = el.value; UI.view = null; UI.bookCheck = null; render(); },
+  cand: el => { UI.selCand = el.value || null; UI.pendingForce = null; refreshModal(); },
+  draft: () => { syncDraft(); refreshModal(); },
+  draftDay: el => { syncDraft(); const w = +el.dataset.w, i = +el.dataset.d; const set = new Set(UI.draft.days[w]||[]); el.checked ? set.add(i) : set.delete(i); UI.draft.days[w] = [...set].sort((a,b)=>a-b); refreshModal(); },
+  empForm: el => {
+    // behåll inmatade värden när formen byts
+    const keep = ['eName','eRole','eGrad','eLg','eStart','eEnd','ePhone','eEmail'].map(id => [id, document.getElementById(id).value]);
+    const certs = Object.keys(CERTS).map(k => [k, document.getElementById('ec_'+k).checked]);
+    UI.empForm = el.value; refreshModal();
+    keep.forEach(([id,v]) => { const x = document.getElementById(id); if (x && !(id==='eGrad' && FORMS[el.value].pay==='hour')) x.value = v; });
+    if (FORMS[el.value].pay==='month' && +document.getElementById('eGrad').value===0) document.getElementById('eGrad').value = 100;
+    certs.forEach(([k,v]) => { document.getElementById('ec_'+k).checked = v; });
+  },
+  payMonth: el => { if (el.value){ UI.payMonth = el.value; render(); } },
+  myMonth: el => { if (el.value){ UI.myMonth = el.value; render(); } },
+  setting: el => {
+    const path = el.dataset.path.split('.'); let o = D.settings; for (let i=0;i<path.length-1;i++) o = o[path[i]];
+    const k = path[path.length-1]; o[k] = el.type==='number' ? (+el.value||0) : el.value; splitCache.clear(); save(); render();
+  },
+  lg: el => { const g = D.settings.lonegrupper[+el.dataset.i]; g[el.dataset.f] = el.dataset.f==='salary' ? (+el.value||0) : el.value; save(); render(); },
+  site: el => { D.sites[+el.dataset.i][el.dataset.f] = el.value; save(); render(); },
+  import: el => {
+    const f = el.files && el.files[0]; if (!f) return; const r = new FileReader();
+    r.onload = () => { try { const x = JSON.parse(r.result); if (!x.employees || !x.series || !x.settings) throw 0; x.singles = x.singles||[]; x.overrides = x.overrides||{}; x.sites = x.sites||[]; D = x; save(); UI.user = D.employees.find(e=>e.role==='arbetsledare')?.id || D.employees[0].id; render(); toast('Säkerhetskopian är importerad'); } catch(e){ toast('Filen är ingen giltig säkerhetskopia från Vaktplan.'); } };
+    r.readAsText(f);
+  },
+};
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-act]'); if (!el) return;
+  if (el.tagName==='TR' && e.target.closest('input,select,a')) return;
+  const fn = ACT[el.dataset.act]; if (fn){ e.preventDefault(); fn(el.dataset, el, e); }
+});
+document.addEventListener('change', e => { const el = e.target.closest('[data-chg]'); if (el && CHG[el.dataset.chg]) CHG[el.dataset.chg](el, e); });
+document.addEventListener('keydown', e => { if (e.key==='Escape' && !$('#modal').hidden) closeModal(); });
+
+/* Start */
+load();
+if (!empById(UI.user)) UI.user = (D.employees.find(e=>e.role==='arbetsledare') || D.employees[0]).id;
+UI.schedStart = mondayOf(today0());
+UI.payMonth = iso(today0()).slice(0,7);
+render();
+</script>
+
+</body></html>
