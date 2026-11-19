@@ -210,20 +210,41 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
 const WD = ['Mån','Tis','Ons','Tor','Fre','Lör','Sön'];
 const WD_LONG = ['måndag','tisdag','onsdag','torsdag','fredag','lördag','söndag'];
 const MONTHS = ['januari','februari','mars','april','maj','juni','juli','augusti','september','oktober','november','december'];
-const STORE_KEY = 'vaktplan.data.v1';
+const STORE_KEY = 'vaktplan.data.v1'; // samma nyckel, data uppgraderas via migrate()
 const UI_KEY = 'vaktplan.ui.v1';
 
+/* Bevakningsavtalet (Kollektivavtal Säkerhetsföretag) § 1 mom 1–4 */
 const FORMS = {
-  tv:      {name:'Tillsvidareanställning', pay:'month', needsEnd:false},
-  prov:    {name:'Provanställning', pay:'month', needsEnd:true, maxMonths:6},
-  sv:      {name:'Särskild visstidsanställning', pay:'month', needsEnd:true},
-  vikariat:{name:'Vikariat', pay:'month', needsEnd:true},
-  sasong:  {name:'Säsongsanställning', pay:'month', needsEnd:true},
-  behov:   {name:'Behovsanställning (timavlönad)', pay:'hour', needsEnd:false},
+  tv:   {name:'Tillsvidareanställning', needsEnd:false},
+  prov: {name:'Provanställning', needsEnd:true, maxMonths:6},
+  viss: {name:'Anställning för viss tid', needsEnd:true},
 };
+const TYPES = {
+  heltid: {name:'Heltid', pay:'month', hint:'Månadslön. Arbetstidsmått 165,6 h/mån (150,67 vid kontinuerligt treskift).'},
+  halvtid:{name:'Halvtid', pay:'hour', hint:'Timlön. Arbetstidsmått minst 82,8 h/mån (75,34 vid treskift) men under heltid.'},
+  deltid: {name:'Deltid', pay:'hour', hint:'Timlön. Arbetstidsmått under 82,8 h/mån (75,34 vid treskift).'},
+  behov:  {name:'Behovsanställning', pay:'hour', hint:'Inget arbetstidsmått, timlön per arbetad timme. Ska efter 9 månaders regelbundet arbete erbjudas annan anställningstyp.'},
+};
+/* § 3 mom 1: lönegrupper och ingruppering */
+const LG = [
+  {id:'N', name:'Nyanställningslön', desc:'De första sex månaderna av anställningen.'},
+  {id:'G', name:'Grundlön', desc:'Efter sex månaders anställning.'},
+  {id:'B', name:'Lönegrupp B', desc:'Port-/stationär-/receptionsbevakning med rondering, rond-/distrikts-/områdesbevakning, butiks- och köpcenterbevakning, hamn- och flygplatskontroll m.m.'},
+  {id:'C', name:'Lönegrupp C', desc:'Ordningsvakt, skyddsvakt, jourdistriktsväktare, resursväktare, värdetransportör, operatör i larmcentral m.m.'},
+  {id:'D', name:'Lönegrupp D', desc:'Operatör i speciella larmcentraler, gruppledare, teknisk utryckningsväktare m.m.'},
+  {id:'E', name:'Lönegrupp E', desc:'Kvalificerad gruppledare, personskydd.'},
+];
+const LG_RANK = {N:0, G:1, B:2, C:3, D:4, E:5};
 const CERTS = {vaktare:'Väktare', skyddsvakt:'Skyddsvakt', ordningsvakt:'Ordningsvakt'};
 const ABS = {sjuk:'Sjuk', semester:'Semester', tjl:'Tjänstledig', vab:'VAB / föräldraledig', utb:'Utbildning', ovrigt:'Övrigt / omplanerat'};
-const OBCATS = {kvall:'Kväll (mån–fre 18–22)', natt:'Natt (22–06)', helg:'Helg (lör–sön, helgdag)', storhelg:'Storhelg'};
+/* § 3 mom 2: ob-tillägg, högsta tillämpliga kategori gäller */
+const OBCATS = {
+  kvallnatt:'Kväll och natt 18–06',
+  helgdag:'Lör-, sön- och helgdag 06–18',
+  helgnatt:'Helgnatt 18–06',
+  storhelg:'Storhelg',
+  afton:'Jul-, nyårs- och midsommarafton',
+};
 
 const pad = n => String(n).padStart(2,'0');
 const iso = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
@@ -252,16 +273,36 @@ const holCache = {};
 function holidays(y){
   if (holCache[y]) return holCache[y];
   const e = easter(y), H = {};
-  const add = (d,name,st) => H[iso(d)] = {name, storhelg:!!st};
-  add(new Date(y,0,1),'Nyårsdagen',1); add(new Date(y,0,6),'Trettondedag jul');
-  add(addDays(e,-2),'Långfredagen',1); add(addDays(e,-1),'Påskafton',1); add(e,'Påskdagen',1); add(addDays(e,1),'Annandag påsk',1);
-  add(new Date(y,4,1),'Första maj'); add(addDays(e,39),'Kristi himmelsfärdsdag'); add(addDays(e,49),'Pingstdagen'); add(new Date(y,5,6),'Nationaldagen');
-  for (let d=19; d<=25; d++){ const x = new Date(y,5,d); if (x.getDay()===5){ add(x,'Midsommarafton',1); add(addDays(x,1),'Midsommardagen',1); } }
-  for (let d=31; d<=37; d++){ const x = new Date(y,9,d); if (x.getDay()===6) add(x,'Alla helgons dag'); }
-  add(new Date(y,11,24),'Julafton',1); add(new Date(y,11,25),'Juldagen',1); add(new Date(y,11,26),'Annandag jul',1); add(new Date(y,11,31),'Nyårsafton',1);
+  // helgdag = allmän helgdag enligt lag; aftnar visas men räknas inte som helgdag
+  const add = (d,name,hd) => H[iso(d)] = {name, helgdag:!!hd};
+  let mids = null;
+  add(new Date(y,0,1),'Nyårsdagen',1); add(new Date(y,0,6),'Trettondedag jul',1);
+  add(addDays(e,-2),'Långfredagen',1); add(addDays(e,-1),'Påskafton',0); add(e,'Påskdagen',1); add(addDays(e,1),'Annandag påsk',1);
+  add(new Date(y,4,1),'Första maj',1); add(addDays(e,39),'Kristi himmelsfärdsdag',1); add(addDays(e,48),'Pingstafton',0); add(addDays(e,49),'Pingstdagen',1); add(new Date(y,5,6),'Nationaldagen',1);
+  for (let d=19; d<=25; d++){ const x = new Date(y,5,d); if (x.getDay()===5){ mids = x; add(x,'Midsommarafton',0); add(addDays(x,1),'Midsommardagen',1); } }
+  for (let d=31; d<=37; d++){ const x = new Date(y,9,d); if (x.getDay()===6) add(x,'Alla helgons dag',1); }
+  add(new Date(y,11,24),'Julafton',0); add(new Date(y,11,25),'Juldagen',1); add(new Date(y,11,26),'Annandag jul',1); add(new Date(y,11,31),'Nyårsafton',0);
+  // Storhelgsperioder enligt § 3 mom 2 c) och d), [start, slut, kategori]
+  const T = (d,h) => { const x = new Date(d); x.setHours(h,0,0,0); return x.getTime(); };
+  const P = [];
+  P.push([T(new Date(y,0,1),6), T(new Date(y,0,2),6), 'storhelg']);
+  P.push([T(addDays(e,-3),18), T(addDays(e,2),6), 'storhelg']);
+  P.push([T(addDays(e,48),6), T(addDays(e,50),6), 'storhelg']);
+  if (mids){ P.push([T(addDays(mids,1),6), T(addDays(mids,2),6), 'storhelg']); P.push([T(mids,6), T(addDays(mids,1),6), 'afton']); }
+  P.push([T(new Date(y,5,6),6), T(new Date(y,5,7),6), 'storhelg']);
+  P.push([T(new Date(y,11,25),6), T(new Date(y,11,27),6), 'storhelg']);
+  P.push([T(new Date(y,11,24),6), T(new Date(y,11,25),6), 'afton']);
+  P.push([T(new Date(y,11,31),6), T(new Date(y+1,0,1),6), 'afton']);
+  Object.defineProperty(H, '_periods', {value:P, enumerable:false});
   return holCache[y] = H;
 }
 const holiday = d => holidays(d.getFullYear())[iso(d)];
+const isHelgdag = d => { const h = holiday(d); return !!(h && h.helgdag); };
+function storhelgCat(t){
+  const y = new Date(t).getFullYear(); let best = null;
+  for (const yy of [y-1, y]) for (const [a,b,c] of holidays(yy)._periods) if (t >= a && t < b){ if (c==='afton') return 'afton'; best = c; }
+  return best;
+}
 
 /* =========================================================
    Data & lagring
@@ -278,24 +319,55 @@ function load(){
   try { raw = s && s.getItem(STORE_KEY); } catch(e){}
   if (raw){ try { D = JSON.parse(raw); } catch(e){ D = null; } }
   if (!D || !D.employees || !D.series) { D = seed(); save(); }
+  else if ((D.version||1) < 2) { migrate(D); save(); }
   try { const u = s && JSON.parse(s.getItem(UI_KEY)||'null'); if (u) Object.assign(UI, u); } catch(e){}
 }
+/* Uppgradering av data från version 1 (exempelvärden) till avtalsmodellen */
+function migrate(x){
+  const lgMap = {G1:'N', G2:'G', G3:'B', G4:'C', G5:'E'};
+  for (const e of x.employees){
+    if (e.typ) continue;
+    const oldForm = e.form, grad = e.grad||0;
+    e.form = oldForm==='prov' ? 'prov' : (['sv','vikariat','sasong'].includes(oldForm) ? 'viss' : 'tv');
+    if (oldForm==='behov') { e.typ = 'behov'; e.matt = 0; }
+    else if (grad >= 100) { e.typ = 'heltid'; e.matt = 0; }
+    else { const m = r2(165.6*grad/100); e.typ = m >= 82.8 ? 'halvtid' : 'deltid'; e.matt = m; }
+    e.treskift = false; e.lg = lgMap[e.lg] || (LG.some(g=>g.id===e.lg) ? e.lg : 'G'); delete e.grad;
+  }
+  for (const r of [...x.series, ...(x.singles||[])]){ if (!('lg' in r)) r.lg = ''; if (!('mealPaid' in r)) r.mealPaid = false; if (!('dog' in r)) r.dog = false; }
+  x.settings = defaultSettings(); x.version = 2;
+}
 
+/* Bevakningsavtalet 2013–2016, § 3 mom 1–2, § 4 mom 5 m.fl. Belopp per avtalsperiod. */
+function tariffs(){
+  return [
+    {from:'2013-04-01', label:'1 april 2013',
+     salary:{N:18207, G:19491, B:23430, C:23807, D:24562, E:24938},
+     hourly:{N:109.95, G:117.70, B:141.49, C:143.76, D:148.32, E:150.59},
+     ob:{kvallnatt:19.35, helgdag:29.40, helgnatt:33.01, storhelg:57.16, afton:128.08},
+     forskjuten:11.48, hund:1.83, semMinTim:145.99},
+    {from:'2014-04-01', label:'1 april 2014',
+     salary:{N:18767, G:20051, B:23990, C:24367, D:25122, E:25498},
+     hourly:{N:113.33, G:121.08, B:144.87, C:147.14, D:151.70, E:153.97},
+     ob:{kvallnatt:19.77, helgdag:30.05, helgnatt:33.74, storhelg:58.41, afton:130.90},
+     forskjuten:11.73, hund:1.87, semMinTim:149.20},
+    {from:'2015-04-01', label:'1 april 2015',
+     salary:{N:19425, G:20709, B:24648, C:25025, D:25780, E:26156},
+     hourly:{N:117.30, G:125.05, B:148.84, C:151.12, D:155.68, E:157.95},
+     ob:{kvallnatt:20.31, helgdag:30.86, helgnatt:34.65, storhelg:59.99, afton:134.44},
+     forskjuten:12.05, hund:1.92, semMinTim:153.23},
+  ];
+}
 function defaultSettings(){
   return {
-    lonegrupper: [
-      {id:'G1', name:'Väktare, 0–12 mån', salary:28400},
-      {id:'G2', name:'Väktare, 1–3 år', salary:29250},
-      {id:'G3', name:'Väktare, över 3 år', salary:30100},
-      {id:'G4', name:'Ordnings-/skyddsvakt', salary:31300},
-      {id:'G5', name:'Arbetsledare', salary:35500},
-    ],
-    ob: {kvall:24.60, natt:49.20, helg:61.50, storhelg:123.00},
-    atf: {kvall:0, natt:6, helg:3, storhelg:6},
-    atfMode: 'saldo',
-    divisor: 174, otEnkel: 94, otKval: 72, semErs: 12,
-    sickPct: 80, karensPct: 20,
-    rules: {maxShift:12, minDailyRest:11, minWeeklyRest:36, maxAvgWeek:48, avgWeeks:4, maxOtMonth:50},
+    avtal: 'Kollektivavtal Säkerhetsföretag 2013–2016 (Almega – Transport)',
+    tariffs: tariffs(),
+    // § 2 mom 1, bilaga 4, § 4 mom 2
+    heltidMatt: 165.6, treskiftMatt: 150.67, nattMatt: 157.6, halvtidMin: 82.8, halvtidMinTreskift: 75.34, nattAndel: 50,
+    otPct: 50,
+    // § 11 mom 6, sjuklönelagen
+    semPct: 13, semMode: 'intjanad', sickPct: 80, karensPct: 20,
+    rules: {maxShift:12, maxShiftOverlap:13, minRest:11, minWeeklyRest:35, minWeeklyRestAbs:24, maxWeek:52, maxAvgWeek:48, avgWeeks:17, maxNightAvg:8, maxOtMonth:50, maxOtYear:200, mealAfter:5, minMeal:30},
   };
 }
 
@@ -305,8 +377,9 @@ function seed(){
   const A = iso(anchor);
   const plusM = (n) => { const d = new Date(T.getFullYear(), T.getMonth()+n, T.getDate()); return iso(d); };
   const fatEnd = iso(addDays(new Date(anchor.getFullYear(), anchor.getMonth()+6, anchor.getDate()), -1));
+  const E = (o) => Object.assign({role:'personal', form:'tv', typ:'heltid', matt:0, treskift:false, end:''}, o);
   const data = {
-    version: 1,
+    version: 2,
     settings: defaultSettings(),
     sites: [
       {id:'s1', name:'Hamnterminalen', address:'Kajvägen 4'},
@@ -315,25 +388,26 @@ function seed(){
       {id:'s4', name:'Arenan', address:'Arenavägen 1'},
     ],
     employees: [
-      {id:'e1', name:'Anna Lindqvist', role:'arbetsledare', form:'tv', grad:100, lg:'G5', certs:['vaktare','ordningsvakt'], start:'2015-03-01', end:'', phone:'070-555 01 01', email:'anna.lindqvist@exempel.se'},
-      {id:'e2', name:'Johan Ek', role:'personal', form:'tv', grad:100, lg:'G3', certs:['vaktare'], start:'2018-09-01', end:'', phone:'070-555 01 02', email:'johan.ek@exempel.se'},
-      {id:'e3', name:'Sara Nilsson', role:'personal', form:'tv', grad:100, lg:'G2', certs:['vaktare'], start:'2023-02-01', end:'', phone:'070-555 01 03', email:'sara.nilsson@exempel.se'},
-      {id:'e4', name:'Mehmet Yilmaz', role:'personal', form:'tv', grad:100, lg:'G4', certs:['vaktare','skyddsvakt'], start:'2016-05-15', end:'', phone:'070-555 01 04', email:'mehmet.yilmaz@exempel.se'},
-      {id:'e5', name:'Lina Karlsson', role:'personal', form:'tv', grad:40, lg:'G4', certs:['vaktare','ordningsvakt'], start:'2020-01-01', end:'', phone:'070-555 01 05', email:'lina.karlsson@exempel.se'},
-      {id:'e6', name:'Erik Johansson', role:'personal', form:'behov', grad:0, lg:'G1', certs:['vaktare'], start:'2025-06-01', end:'', phone:'070-555 01 06', email:'erik.johansson@exempel.se'},
-      {id:'e7', name:'Fatima Hassan', role:'personal', form:'prov', grad:100, lg:'G1', certs:['vaktare'], start:A, end:fatEnd, phone:'070-555 01 07', email:'fatima.hassan@exempel.se'},
-      {id:'e8', name:'Oskar Berg', role:'personal', form:'behov', grad:0, lg:'G2', certs:['vaktare','ordningsvakt'], start:'2024-04-01', end:'', phone:'070-555 01 08', email:'oskar.berg@exempel.se'},
-      {id:'e9', name:'Maja Holm', role:'personal', form:'vikariat', grad:100, lg:'G2', certs:['vaktare'], start:A, end:plusM(5), phone:'070-555 01 09', email:'maja.holm@exempel.se'},
-      {id:'e10', name:'Ali Rahimi', role:'personal', form:'sv', grad:40, lg:'G1', certs:['vaktare','ordningsvakt'], start:A, end:plusM(4), phone:'070-555 01 10', email:'ali.rahimi@exempel.se'},
+      E({id:'e1', name:'Anna Lindqvist', role:'arbetsledare', lg:'E', certs:['vaktare','ordningsvakt'], start:'2015-03-01', phone:'070-555 01 01', email:'anna.lindqvist@exempel.se'}),
+      E({id:'e2', name:'Johan Ek', lg:'B', certs:['vaktare'], start:'2018-09-01', phone:'070-555 01 02', email:'johan.ek@exempel.se'}),
+      E({id:'e3', name:'Sara Nilsson', lg:'B', certs:['vaktare'], start:'2023-02-01', phone:'070-555 01 03', email:'sara.nilsson@exempel.se'}),
+      E({id:'e4', name:'Mehmet Yilmaz', lg:'C', certs:['vaktare','skyddsvakt'], start:'2016-05-15', phone:'070-555 01 04', email:'mehmet.yilmaz@exempel.se'}),
+      E({id:'e5', name:'Lina Karlsson', typ:'deltid', matt:70, lg:'C', certs:['vaktare','ordningsvakt'], start:'2020-01-01', phone:'070-555 01 05', email:'lina.karlsson@exempel.se'}),
+      E({id:'e6', name:'Erik Johansson', typ:'behov', lg:'N', certs:['vaktare'], start:iso(new Date(T.getFullYear(), T.getMonth()-4, 1)), phone:'070-555 01 06', email:'erik.johansson@exempel.se'}),
+      E({id:'e7', name:'Fatima Hassan', form:'prov', lg:'N', certs:['vaktare'], start:A, end:fatEnd, phone:'070-555 01 07', email:'fatima.hassan@exempel.se'}),
+      E({id:'e8', name:'Oskar Berg', typ:'behov', lg:'C', certs:['vaktare','ordningsvakt'], start:'2024-04-01', phone:'070-555 01 08', email:'oskar.berg@exempel.se'}),
+      E({id:'e9', name:'Maja Holm', form:'viss', lg:'G', certs:['vaktare'], start:iso(new Date(T.getFullYear(), T.getMonth()-11, 1)), end:plusM(5), phone:'070-555 01 09', email:'maja.holm@exempel.se'}),
+      E({id:'e10', name:'Ali Rahimi', typ:'deltid', matt:70, lg:'B', certs:['vaktare','ordningsvakt'], start:'2023-03-01', phone:'070-555 01 10', email:'ali.rahimi@exempel.se'}),
     ],
     series: [
-      {id:'n1', name:'Natt A', siteId:'s1', from:'18:00', to:'06:00', breakMin:0, cycle:2, days:[[0,1,4,5,6],[2,3]], start:A, end:'', personId:'e2', requires:'vaktare'},
-      {id:'n2', name:'Natt B', siteId:'s1', from:'18:00', to:'06:00', breakMin:0, cycle:2, days:[[2,3],[0,1,4,5,6]], start:A, end:'', personId:'e3', requires:'vaktare'},
-      {id:'d1', name:'Dag A', siteId:'s1', from:'06:00', to:'18:00', breakMin:0, cycle:2, days:[[0,1,4,5,6],[2,3]], start:A, end:'', personId:'e4', requires:'vaktare'},
-      {id:'d2', name:'Dag B', siteId:'s1', from:'06:00', to:'18:00', breakMin:0, cycle:2, days:[[2,3],[0,1,4,5,6]], start:A, end:'', personId:'e7', requires:'vaktare'},
-      {id:'r1', name:'Reception', siteId:'s2', from:'08:00', to:'17:00', breakMin:60, cycle:1, days:[[0,1,2,3,4]], start:A, end:'', personId:'e9', requires:'vaktare'},
-      {id:'k1', name:'Kvällsrond helg', siteId:'s3', from:'17:00', to:'01:00', breakMin:0, cycle:1, days:[[4,5]], start:A, end:'', personId:'e5', requires:'vaktare'},
-      {id:'k2', name:'Kvällsrond vardag', siteId:'s3', from:'17:00', to:'01:00', breakMin:0, cycle:2, days:[[0,1],[2,3]], start:A, end:'', personId:'e10', requires:'vaktare'},
+      {id:'n1', name:'Natt A', siteId:'s1', from:'18:00', to:'06:00', breakMin:60, mealPaid:false, dog:false, lg:'B', cycle:4, days:[[0,1,4,5,6],[2,3],[0,1,4,5],[2,3]], start:A, end:'', personId:'e2', requires:'vaktare'},
+      {id:'n2', name:'Natt B', siteId:'s1', from:'18:00', to:'06:00', breakMin:60, mealPaid:false, dog:false, lg:'B', cycle:4, days:[[2,3],[0,1,4,5,6],[2,3],[0,1,4,5]], start:A, end:'', personId:'e3', requires:'vaktare'},
+      {id:'n3', name:'Natt, ATF-pass', siteId:'s1', from:'18:00', to:'06:00', breakMin:60, mealPaid:false, dog:false, lg:'B', cycle:4, days:[[],[],[6],[6]], start:A, end:'', personId:null, requires:'vaktare'},
+      {id:'d1', name:'Dag A', siteId:'s1', from:'06:00', to:'18:00', breakMin:60, mealPaid:false, dog:false, lg:'B', cycle:2, days:[[0,1,4,5,6],[2,3]], start:A, end:'', personId:'e4', requires:'vaktare'},
+      {id:'d2', name:'Dag B', siteId:'s1', from:'06:00', to:'18:00', breakMin:60, mealPaid:false, dog:false, lg:'B', cycle:2, days:[[2,3],[0,1,4,5,6]], start:A, end:'', personId:'e7', requires:'vaktare'},
+      {id:'r1', name:'Reception', siteId:'s2', from:'08:00', to:'16:00', breakMin:30, skipHol:true, mealPaid:false, dog:false, lg:'B', cycle:1, days:[[0,1,2,3,4]], start:A, end:'', personId:'e9', requires:'vaktare'},
+      {id:'k1', name:'Kvällsrond helg', siteId:'s3', from:'17:00', to:'01:00', breakMin:0, mealPaid:true, dog:false, lg:'B', cycle:1, days:[[4,5]], start:A, end:'', personId:'e5', requires:'vaktare'},
+      {id:'k2', name:'Hundpatrull vardag', siteId:'s3', from:'17:00', to:'01:00', breakMin:0, mealPaid:true, dog:true, lg:'B', cycle:2, days:[[0,1],[2,3]], start:A, end:'', personId:'e10', requires:'vaktare'},
     ],
     singles: [],
     overrides: {},
@@ -364,14 +438,14 @@ function seed(){
   // 5) Extrapass på Arenan och förstärkning
   const sat = d0 => { let x = new Date(d0); while (wdIdx(x)!==5) x = addDays(x,1); return x; };
   const nextSat = sat(addDays(T,1));
-  data.singles.push({id:'x1', date:iso(nextSat), from:'16:00', to:'23:00', siteId:'s4', name:'Arena: match', personId:'e10', open:false, cancelled:false, breakMin:0, requires:'ordningsvakt'});
-  data.singles.push({id:'x2', date:iso(nextSat), from:'16:00', to:'23:00', siteId:'s4', name:'Arena: match', personId:null, open:true, cancelled:false, breakMin:0, requires:'ordningsvakt'});
-  data.singles.push({id:'x3', date:iso(nextSat), from:'16:00', to:'23:00', siteId:'s4', name:'Arena: match', personId:null, open:true, cancelled:false, breakMin:0, requires:'ordningsvakt'});
+  data.singles.push({id:'x1', date:iso(nextSat), from:'16:00', to:'23:00', siteId:'s4', name:'Arena: match', personId:'e10', open:false, cancelled:false, breakMin:0, mealPaid:true, dog:false, lg:'C', requires:'ordningsvakt'});
+  data.singles.push({id:'x2', date:iso(nextSat), from:'16:00', to:'23:00', siteId:'s4', name:'Arena: match', personId:null, open:true, cancelled:false, breakMin:0, mealPaid:true, dog:false, lg:'C', requires:'ordningsvakt'});
+  data.singles.push({id:'x3', date:iso(nextSat), from:'16:00', to:'23:00', siteId:'s4', name:'Arena: match', personId:null, open:true, cancelled:false, breakMin:0, mealPaid:true, dog:false, lg:'C', requires:'ordningsvakt'});
   const pastSat = sat(addDays(M,0));
-  data.singles.push({id:'x4', date:iso(pastSat), from:'15:00', to:'23:00', siteId:'s4', name:'Arena: konsert', personId:'e8', open:false, cancelled:false, breakMin:0, requires:'ordningsvakt'});
-  data.singles.push({id:'x5', date:iso(pastSat), from:'15:00', to:'23:00', siteId:'s4', name:'Arena: konsert', personId:'e3', open:false, cancelled:false, breakMin:0, requires:'ordningsvakt'});
+  data.singles.push({id:'x4', date:iso(pastSat), from:'15:00', to:'23:00', siteId:'s4', name:'Arena: konsert', personId:'e8', open:false, cancelled:false, breakMin:0, mealPaid:true, dog:false, lg:'C', requires:'ordningsvakt'});
+  data.singles.push({id:'x5', date:iso(pastSat), from:'15:00', to:'23:00', siteId:'s4', name:'Arena: konsert', personId:'e3', open:false, cancelled:false, breakMin:0, mealPaid:true, dog:false, lg:'C', requires:'ordningsvakt'});
   let wed = addDays(T,1); while (wdIdx(wed)!==2) wed = addDays(wed,1);
-  data.singles.push({id:'x6', date:iso(wed), from:'22:00', to:'06:00', siteId:'s1', name:'Förstärkning fartygsanlöp', personId:null, open:false, cancelled:false, breakMin:0, requires:'vaktare'});
+  data.singles.push({id:'x6', date:iso(wed), from:'22:00', to:'06:00', siteId:'s1', name:'Förstärkning fartygsanlöp', personId:null, open:false, cancelled:false, breakMin:60, mealPaid:false, dog:false, lg:'B', requires:'vaktare'});
   return data;
 }
 
@@ -381,7 +455,31 @@ function seed(){
 const empById = id => D.employees.find(e => e.id===id);
 const siteById = id => D.sites.find(s => s.id===id);
 const seriesById = id => D.series.find(s => s.id===id);
-const lgOf = e => D.settings.lonegrupper.find(g => g.id===e.lg);
+const lgOf = e => LG.find(g => g.id===e.lg);
+const isHeltid = e => e.typ === 'heltid';
+const isHourly = e => TYPES[e.typ]?.pay === 'hour';
+/* Arbetstidsmått per månad enligt § 2 mom 1 (och bilaga 4 för nattarbetande) */
+function baseMatt(e){ const S = D.settings; if (e.typ==='heltid') return e.treskift ? S.treskiftMatt : S.heltidMatt; if (e.typ==='behov') return 0; return +e.matt||0; }
+function nightMatt(e){ const S = D.settings; return r2(baseMatt(e) * S.nattMatt / S.heltidMatt); }
+function empType(e){ return TYPES[e.typ]?.name + (e.typ==='halvtid'||e.typ==='deltid' ? ` ${num(e.matt)} h/mån` : '') + (e.treskift ? ', treskift' : ''); }
+function empLabel(e){ return `${FORMS[e.form]?.name||''}, ${(TYPES[e.typ]?.name||'').toLowerCase()}${e.typ==='halvtid'||e.typ==='deltid' ? ' '+num(e.matt)+' h/mån' : ''}`; }
+function monthsBetween(a, b){ return (b.getFullYear()-a.getFullYear())*12 + (b.getMonth()-a.getMonth()) - (b.getDate() < a.getDate() ? 1 : 0); }
+/* Påminnelser enligt § 1 mom 4 och § 3 mom 1 definitioner */
+function empFlags(e){
+  const t0 = today0(), out = [];
+  if (e.start){
+    const m = monthsBetween(parseISO(e.start), t0);
+    if (e.lg==='N' && m >= 6) out.push(['warn', m >= 15 ? 'Ska ingrupperas i B–E (15 mån)' : 'Ska ha grundlön (6 mån)']);
+    else if (e.lg==='G' && m >= 15) out.push(['warn','Ska ingrupperas i B–E (15 mån)']);
+    if (e.typ==='behov' && m >= 9) out.push(['info','9 mån behov: erbjud annan anställningstyp']);
+    if (e.form==='prov'){ const s = parseISO(e.start); const max = addDays(new Date(s.getFullYear(), s.getMonth()+6, s.getDate()), -1); const left = dayDiff(t0, max); if (left >= 0 && left <= 30) out.push(['warn',`Provanställning löper ut ${iso(max)}`]); }
+  }
+  if (FORMS[e.form]?.needsEnd && !e.end) out.push(['err','Slutdatum saknas']);
+  else if (e.end){ const left = dayDiff(t0, parseISO(e.end)); if (left >= 0 && left <= 30) out.push(['warn','Slutar snart']); }
+  return out;
+}
+const tariffLabel = ds => { const d = parseISO(ds); return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`; };
+function tariffFor(ds){ const list = [...D.settings.tariffs].sort((a,b)=>a.from.localeCompare(b.from)); let t = list[0]; for (const x of list) if (x.from <= ds) t = x; return t; }
 const firstName = id => { const e = empById(id); return e ? e.name.split(' ')[0] : '?'; };
 const empName = id => { const e = empById(id); return e ? e.name : '–'; };
 
@@ -389,6 +487,7 @@ function seriesOccursOn(s, d){
   const ds = iso(d);
   if (!s.start || ds < s.start) return false;
   if (s.end && ds > s.end) return false;
+  if (s.skipHol && isHelgdag(d)) return false;
   const anchor = mondayOf(parseISO(s.start));
   const w = Math.floor(dayDiff(anchor, d) / 7);
   const cyc = Math.max(1, s.cycle|0);
@@ -415,7 +514,7 @@ function occurrences(from, to){
       } else { personId = s.personId || null; status = personId ? 'ordinary' : (o.open ? 'open' : 'vacant'); }
       if (personId && !empById(personId)){ personId = null; status = 'vacant'; }
       out.push({id, kind:'series', seriesId:s.id, date:ds, start, end, siteId:s.siteId, name:s.name, ordinaryId:s.personId||null,
-        personId, status, absence:o.absence||null, overridden: !!D.overrides[id], breakMin:s.breakMin||0, requires:s.requires||''});
+        personId, status, absence:o.absence||null, overridden: !!D.overrides[id], breakMin:s.breakMin||0, requires:s.requires||'', lg:s.lg||'', mealPaid:!!s.mealPaid, dog:!!s.dog});
     }
   }
   const f = iso(from), t = iso(to);
@@ -426,7 +525,7 @@ function occurrences(from, to){
     const status = x.cancelled ? 'cancelled' : personId ? 'extra' : (x.open ? 'open' : 'vacant');
     if (x.cancelled) personId = null;
     out.push({id:'x:'+x.id, kind:'single', singleId:x.id, date:x.date, start, end, siteId:x.siteId, name:x.name, ordinaryId:null,
-      personId, status, absence:null, overridden:false, breakMin:x.breakMin||0, requires:x.requires||''});
+      personId, status, absence:null, overridden:false, breakMin:x.breakMin||0, requires:x.requires||'', lg:x.lg||'', mealPaid:!!x.mealPaid, dog:!!x.dog});
   }
   out.sort((a,b) => a.start - b.start || a.name.localeCompare(b.name));
   return out;
@@ -472,52 +571,53 @@ function checkPerson(emp, shifts){
   const add = (level, rule, msg, ids, key) => issues.push({level, rule, msg, shifts:ids, key: key || (rule+':'+ids.join(',')), personId: emp.id});
   for (let i=0;i<shifts.length;i++){
     const s = shifts[i], len = grossH(s);
-    if (len > 13) add('error','Passlängd',`Passet är ${hrs(len)} h. Det ger inte utrymme för 11 h dygnsvila inom 24 h (ATL 13 §).`,[s.id]);
-    else if (len > R.maxShift) add('warn','Passlängd',`Passet är ${hrs(len)} h, längre än tillåtna ${R.maxShift} h.`,[s.id]);
-    if (i>0 && shifts[i-1].end > s.start) add('error','Dubbelbokning',`Överlappar ${occLabel(shifts[i-1])}.`,[shifts[i-1].id, s.id]);
+    if (len > R.maxShiftOverlap) add('error','Passlängd',`Passet är ${hrs(len)} h. Max ${R.maxShift} h, eller ${R.maxShiftOverlap} h vid dygnet runt-bevakning med överlappning (§ 2 mom 4). Tid över 13 h per pass är övertid (§ 4 mom 3).`,[s.id]);
+    else if (len > R.maxShift) add('warn','Passlängd',`Passet är ${hrs(len)} h. Över ${R.maxShift} h kräver lokal överenskommelse eller överlappning vid dygnet runt-bevakning (§ 2 mom 4).`,[s.id]);
+    if (len > R.mealAfter && !s.mealPaid && (s.breakMin||0) < R.minMeal) add('warn','Rast',`Pass över ${R.mealAfter} h ska ha måltidsrast om minst ${R.minMeal} min, högst 1 h, eller betalt måltidsuppehåll på arbetsplatsen (§ 2 mom 5).`,[s.id]);
+    else if ((s.breakMin||0) > 90) add('warn','Rast',`Måltidsrasten är ${s.breakMin} min. Högst 1 h, eller 1,5 h efter lokal överenskommelse (§ 2 mom 5).`,[s.id]);
+    if (i>0){
+      const p = shifts[i-1];
+      if (p.end > s.start) add('error','Dubbelbokning',`Överlappar ${occLabel(p)}.`,[p.id, s.id]);
+      else { const gap = (s.start - p.end)/36e5; if (gap < R.minRest - 1e-9) add('error','Dygnsvila',`${hrs(gap)} h mellan ${occLabel(p)} och ${occLabel(s)}. Uppehållet mellan passen ska vara minst ${R.minRest} h (§ 2 mom 3, ATL 13 §).`,[p.id, s.id],'dygn:'+p.id+','+s.id); }
+    }
     if ((emp.start && s.date < emp.start) || (emp.end && s.date > emp.end)) add('error','Anställning',`Passet ligger utanför anställningsperioden (${emp.start||'…'} – ${emp.end||'tills vidare'}).`,[s.id]);
     if (s.requires && !(emp.certs||[]).includes(s.requires)) add('warn','Behörighet',`Passet kräver behörighet som ${CERTS[s.requires]||s.requires}.`,[s.id]);
   }
-  // Dygnsvila: varje 24-timmarsperiod från ett passtart ska ha minst X h sammanhängande vila
-  for (let i=0;i<shifts.length;i++){
-    const ws = shifts[i].start.getTime(), we = ws + 864e5;
-    const win = []; for (let j=i; j<shifts.length && shifts[j].start.getTime() < we; j++) win.push(shifts[j]);
-    if (win.length < 2) continue;
-    const free = maxFree(win.map(s => [s.start.getTime(), s.end.getTime()]), ws, we) / 36e5;
-    if (free < R.minDailyRest - 1e-9){
-      const last = win[win.length-1], prev = win[win.length-2];
-      const gap = Math.max(0, (last.start - prev.end)/36e5);
-      add('error','Dygnsvila',`${hrs(gap)} h vila mellan ${occLabel(prev)} och ${occLabel(last)}. Krav: ${R.minDailyRest} h sammanhängande vila per 24 h (ATL 13 §).`,[prev.id,last.id],'dygn:'+prev.id+','+last.id);
-    }
-  }
-  // Veckovila per kalendervecka & snittarbetstid
-  const weeks = new Map();
+  // Veckovila (§ 2 mom 2), veckoarbetstid (§ 2 mom 4), sammanlagd arbetstid och nattarbete (bilaga 3)
+  const weeks = new Map(), weekHours = new Map(), weekNight = new Map();
   for (const s of shifts){ for (const k of new Set([iso(mondayOf(s.start)), iso(mondayOf(new Date(s.end.getTime()-1)))])){ if (!weeks.has(k)) weeks.set(k, []); weeks.get(k).push(s); } }
-  const weekHours = new Map();
-  for (const s of shifts){ const k = iso(mondayOf(s.start)); weekHours.set(k, (weekHours.get(k)||0) + hoursOf(s)); }
+  for (const s of shifts){ const k = iso(mondayOf(s.start)); weekHours.set(k, (weekHours.get(k)||0) + hoursOf(s)); const nw = weekNight.get(k) || [0,0]; nw[0]++; if (obSplit(s).natt22 >= 180) nw[1]++; weekNight.set(k, nw); }
+  const n = Math.max(1, R.avgWeeks|0);
   for (const [k, list] of weeks){
+    const wk = isoWeek(parseISO(k));
     const ws = parseISO(k).getTime(), we = addDays(parseISO(k),7).getTime();
     const free = maxFree(list.map(s => [s.start.getTime(), s.end.getTime()]).sort((a,b)=>a[0]-b[0]), ws, we) / 36e5;
-    if (free < R.minWeeklyRest - 1e-9) add('error','Veckovila',`Vecka ${isoWeek(parseISO(k))}: längsta sammanhängande ledighet är ${hrs(free)} h. Krav: ${R.minWeeklyRest} h per sjudagarsperiod (ATL 14 §).`, list.map(s=>s.id), 'vecka:'+emp.id+':'+k);
-    const n = Math.max(1, R.avgWeeks|0); let sum = 0;
-    for (let w=0; w<n; w++) sum += weekHours.get(iso(addDays(parseISO(k), -7*w))) || 0;
-    const avg = sum / n;
-    if (avg > R.maxAvgWeek + 1e-9 && weekHours.get(k)) add('warn','Arbetstid',`I snitt ${hrs(avg)} h/vecka under ${n} veckor fram till v.${isoWeek(parseISO(k))}. Max ${R.maxAvgWeek} h sammanlagd arbetstid i snitt (ATL 10 b §).`, list.filter(s=>iso(mondayOf(s.start))===k).map(s=>s.id), 'snitt:'+emp.id+':'+k);
+    if (free < R.minWeeklyRestAbs - 1e-9) add('error','Veckovila',`Vecka ${wk}: längsta sammanhängande ledighet är ${hrs(free)} h. Vid schemaläggning får veckovilan aldrig understiga ${R.minWeeklyRestAbs} h per 7-dygnsperiod (§ 2 mom 2).`, list.map(s=>s.id), 'vecka:'+emp.id+':'+k);
+    else if (free < R.minWeeklyRest - 1e-9) add('warn','Veckovila',`Vecka ${wk}: längsta sammanhängande ledighet är ${hrs(free)} h. Veckovilan ska vara minst ${R.minWeeklyRest} h; avsteg bara när schemat kräver det (§ 2 mom 2).`, list.map(s=>s.id), 'vecka:'+emp.id+':'+k);
+    const own = list.filter(s=>iso(mondayOf(s.start))===k).map(s=>s.id);
+    const wh = weekHours.get(k)||0;
+    if (wh > R.maxWeek + 1e-9) add('error','Veckoarbetstid',`Vecka ${wk}: ${hrs(wh)} h. Arbetstiden får inte överstiga ${R.maxWeek} h per vecka (§ 2 mom 4).`, own, 'vtid:'+emp.id+':'+k);
+    if (!wh) continue;
+    let sum = 0, cnt = 0, nights = 0;
+    for (let w=0; w<n; w++){ const kk = iso(addDays(parseISO(k), -7*w)); sum += weekHours.get(kk) || 0; const nw = weekNight.get(kk); if (nw){ cnt += nw[0]; nights += nw[1]; } }
+    if (sum/n > R.maxAvgWeek + 1e-9) add('warn','Arbetstid',`I snitt ${hrs(sum/n)} h/vecka under ${n} veckor fram till v.${wk}. Den sammanlagda arbetstiden får inte överstiga ${R.maxAvgWeek} h/vecka i snitt under 4 månader (bilaga 3, ATL 10 b §).`, own, 'snitt:'+emp.id+':'+k);
+    if (cnt && nights/cnt >= 0.5){ const per24 = sum / (6*n); if (per24 > R.maxNightAvg + 1e-9) add('warn','Nattarbete',`Nattarbetande: i snitt ${hrs(per24)} h per 24 h under ${n} veckor fram till v.${wk}. Max ${R.maxNightAvg} h i snitt (bilaga 3, 2 §).`, own, 'natt:'+emp.id+':'+k); }
   }
-  // Övertid per kalendermånad för heltidsanställda månadsavlönade
-  if (FORMS[emp.form]?.pay === 'month' && (emp.grad||0) >= 100){
+  // Allmän övertid (bilaga 3, 3 §): extra pass för heltidsanställda
+  if (isHeltid(emp)){
     const months = new Map();
     for (const s of shifts){ if (s.kind==='single' || s.ordinaryId !== emp.id){ const k = s.date.slice(0,7); if (!months.has(k)) months.set(k, []); months.get(k).push(s); } }
-    for (const [k, list] of months){ const h = list.reduce((a,s)=>a+hoursOf(s),0); if (h > R.maxOtMonth) add('warn','Övertid',`${hrs(h)} h extratid i ${MONTHS[+k.slice(5)-1]}. Max ${R.maxOtMonth} h allmän övertid per månad (ATL 8 §).`, list.map(s=>s.id), 'ot:'+emp.id+':'+k); }
+    for (const [k, list] of months){ const h = list.reduce((a,s)=>a+hoursOf(s),0); if (h > R.maxOtMonth) add('warn','Övertid',`${hrs(h)} h utöver schema i ${MONTHS[+k.slice(5)-1]}. Allmän övertid högst ${R.maxOtMonth} h per kalendermånad och ${R.maxOtYear} h per år (bilaga 3, 3 §).`, list.map(s=>s.id), 'ot:'+emp.id+':'+k); }
   }
   const seen = new Set();
   return issues.filter(i => seen.has(i.key) ? false : (seen.add(i.key), true));
 }
+const poolDays = () => Math.max(35, (D.settings.rules.avgWeeks|0)*7);
 const memo = new Map();
 function analyze(from, to){
   const key = VER+'|'+iso(from)+'|'+iso(to);
   if (memo.has(key)) return memo.get(key);
-  const occs = occurrences(addDays(from,-35), addDays(to,35));
+  const occs = occurrences(addDays(from,-poolDays()), addDays(to,35));
   const byOcc = new Map(), list = [], f = iso(from), t = iso(to), byId = new Map(occs.map(o=>[o.id,o]));
   for (const emp of D.employees){
     const shifts = occs.filter(o => o.personId===emp.id && o.status!=='cancelled');
@@ -535,7 +635,7 @@ function analyze(from, to){
 }
 function simulate(occ, pid, pool){
   const emp = empById(pid); if (!emp) return [];
-  const occs = pool || occurrences(addDays(occ.start,-35), addDays(occ.start,35));
+  const occs = pool || occurrences(addDays(occ.start,-poolDays()), addDays(occ.start,35));
   const shifts = occs.filter(o => o.personId===pid && o.status!=='cancelled' && o.id!==occ.id);
   shifts.push(Object.assign({}, occ, {personId:pid, status: occ.kind==='single' ? 'extra' : (pid===occ.ordinaryId ? 'ordinary':'reassigned')}));
   shifts.sort((a,b)=>a.start-b.start);
@@ -544,80 +644,128 @@ function simulate(occ, pid, pool){
 const worst = list => list.some(i=>i.level==='error') ? 'error' : list.length ? 'warn' : null;
 
 /* =========================================================
-   Lön
+   Lön enligt Bevakningsavtalet
    ========================================================= */
-function obCat(d){
-  const h = holiday(d);
-  if (h && h.storhelg) return 'storhelg';
-  if (h || wdIdx(d) >= 5) return 'helg';
-  const hr = d.getHours();
-  if (hr >= 22 || hr < 6) return 'natt';
-  if (hr >= 18) return 'kvall';
+/* OB-kategori för en minut (§ 3 mom 2). Högsta tillämpliga belopp gäller: d > c > b1 > b > a. */
+function obCat(t, shiftStart){
+  const sc = storhelgCat(t); if (sc) return sc;
+  const d = new Date(t), hr = d.getHours(), day = parseISO(iso(d));
+  if (hr >= 18 || hr < 6){
+    const E = hr >= 18 ? day : addDays(day, -1), M = addDays(E, 1);
+    if ([5,6,0].includes(wdIdx(M)) || isHelgdag(M) || isHelgdag(E)) return 'helgnatt';
+    return 'kvallnatt';
+  }
+  if (wdIdx(d) >= 5 || isHelgdag(d)) return 'helgdag';
+  // Anm. fr.o.m. 2015-01-01: natt mot helgfri vardag ger ob till passets slut, längst till kl 08
+  if (hr < 8 && shiftStart < day.getTime() && iso(d) >= '2015-01-01') return 'kvallnatt';
   return null;
 }
-const isEnkelOt = d => !holiday(d) && wdIdx(d) < 5 && d.getHours() >= 6 && d.getHours() < 20;
 const splitCache = new Map();
 function obSplit(o){
   const key = o.start.getTime()+'-'+o.end.getTime();
   if (splitCache.has(key)) return splitCache.get(key);
-  const r = {kvall:0, natt:0, helg:0, storhelg:0, enkel:0, kval:0, total:0};
-  for (let t = o.start.getTime(); t < o.end.getTime(); t += 6e4){ const d = new Date(t); const c = obCat(d); if (c) r[c]++; if (isEnkelOt(d)) r.enkel++; else r.kval++; r.total++; }
+  const r = {kvallnatt:0, helgdag:0, helgnatt:0, storhelg:0, afton:0, natt22:0, total:0};
+  const st = o.start.getTime();
+  for (let t = st; t < o.end.getTime(); t += 6e4){ const c = obCat(t, st); if (c) r[c]++; const h = new Date(t).getHours(); if (h >= 22 || h < 6) r.natt22++; r.total++; }
   splitCache.set(key, r); return r;
 }
 function monthRange(ym){ const [y,m] = ym.split('-').map(Number); return [new Date(y,m-1,1), new Date(y,m,0)]; }
-function calcPay(emp, ym, occsMonth){
-  const S = D.settings, lg = lgOf(emp), mlon = lg ? lg.salary : 0, tim = mlon / S.divisor;
-  const hourly = FORMS[emp.form]?.pay === 'hour', grad = hourly ? 0 : (emp.grad||0);
-  const occs = occsMonth || (() => { const [a,b] = monthRange(ym); return occurrences(a,b); })();
+const payMemo = new Map();
+function payCtx(ym){
+  const key = VER+'|'+ym; if (payMemo.has(key)) return payMemo.get(key);
+  const [y,m] = ym.split('-').map(Number); const q0 = Math.floor((m-1)/3)*3;
+  const occsQ = occurrences(new Date(y,q0,1), new Date(y,q0+3,0));
+  const ctx = {ym, occsQ, months:[0,1,2].map(i=>`${y}-${pad(q0+i+1)}`), qEnd: m===q0+3, occsMonth: occsQ.filter(o=>o.date.slice(0,7)===ym)};
+  if (payMemo.size > 24) payMemo.clear(); payMemo.set(key, ctx); return ctx;
+}
+function monthStats(emp, occs){
+  const S = D.settings;
   const worked = occs.filter(o => o.personId===emp.id && o.status!=='cancelled');
   const absent = occs.filter(o => o.kind==='series' && o.ordinaryId===emp.id && ['vacant','open','reassigned'].includes(o.status));
-  let ord=0, extra=0, enkel=0, kval=0, atfH=0; const ob = {kvall:0, natt:0, helg:0, storhelg:0};
-  const shiftRows = [];
-  for (const o of worked){
-    const h = hoursOf(o), sp = obSplit(o), f = sp.total ? (h*60/sp.total)/60 : 0;
-    const isOrd = o.kind==='series' && o.ordinaryId===emp.id;
-    if (isOrd || hourly) ord += h; else { extra += h; enkel += sp.enkel*f; kval += sp.kval*f; }
-    let obh = 0;
-    for (const c in ob){ ob[c] += sp[c]*f; obh += sp[c]*f; atfH += sp[c]*f*(S.atf[c]||0)/60; }
-    shiftRows.push({o, h, obh, type: hourly ? 'Timlön' : isOrd ? 'Ordinarie' : (grad<100 ? 'Mertid' : 'Övertid')});
-  }
+  const own = occs.filter(o => o.kind==='series' && o.ordinaryId===emp.id && o.status!=='cancelled');
+  let ordH = 0, extraH = 0;
+  for (const o of worked){ const h = hoursOf(o); if (o.kind==='series' && o.ordinaryId===emp.id) ordH += h; else extraH += h; }
+  const absH = {}; for (const o of absent){ const r = o.absence || 'ovrigt'; absH[r] = (absH[r]||0) + hoursOf(o); }
+  // Nattarbetande enligt bilaga 4: mer än 50 % av schemalagda timmar mellan 22 och 06
+  let nm = 0, tm = 0; for (const o of (emp.typ==='behov' ? worked : own)){ const sp = obSplit(o); nm += sp.natt22; tm += sp.total; }
+  const natt = emp.typ!=='behov' && tm > 0 && nm/tm*100 > S.nattAndel;
+  const base = baseMatt(emp), matt = natt ? nightMatt(emp) : base;
+  const counted = ordH + extraH + (absH.sjuk||0) + (absH.semester||0) + (absH.utb||0) + (absH.ovrigt||0);
+  return {worked, absent, ordH, extraH, absH, natt, base, matt, atf: r2(base - matt), counted};
+}
+/* § 4 mom 3: övertid = tid över 165,6 h/mån (eller reducerat mått) i genomsnitt under kalenderkvartalet */
+function quarterOT(emp, ctx){
+  let counted = 0, matt = 0, extra = 0;
+  for (const m of ctx.months){ if (m > ctx.ym) break; const st = monthStats(emp, ctx.occsQ.filter(o=>o.date.slice(0,7)===m)); counted += st.counted; matt += st.matt; extra += st.extraH; }
+  return {counted, matt, extra, otH: Math.max(0, counted - matt)};
+}
+function calcPay(emp, ym, ctx){
+  ctx = ctx || payCtx(ym);
+  const S = D.settings, [a] = monthRange(ym), T = tariffFor(iso(a));
+  const lg = lgOf(emp), mlon = T.salary[emp.lg] || 0, tim = T.hourly[emp.lg] || 0;
+  const monthly = isHeltid(emp);
+  const st = monthStats(emp, ctx.occsMonth);
   const lines = [];
   const L = (text, qty, price, amount, kind) => lines.push({text, qty, price, amount: r2(amount ?? (qty*price)), kind: kind||'pay'});
-  if (hourly) { if (ord) L('Timlön', ord, tim); }
-  else L(`Månadslön (${grad} %)`, null, null, mlon*grad/100);
-  if (!hourly && extra){
-    if (grad < 100) L('Mertid', extra, tim);
-    else { if (enkel) L('Övertid, enkel (mån–fre 06–20)', enkel, mlon/S.otEnkel); if (kval) L('Övertid, kvalificerad', kval, mlon/S.otKval); }
+  const ob = {kvallnatt:0, helgdag:0, helgnatt:0, storhelg:0, afton:0};
+  const shiftRows = []; let lgAdd = 0, lgAddH = 0, dogH = 0;
+  for (const o of st.worked){
+    const h = hoursOf(o), sp = obSplit(o), f = sp.total ? h/sp.total : 0;
+    let obh = 0; for (const c in ob){ ob[c] += sp[c]*f; obh += sp[c]*f; }
+    const isOrd = o.kind==='series' && o.ordinaryId===emp.id;
+    if (o.lg && LG_RANK[emp.lg] >= 2 && LG_RANK[o.lg] > LG_RANK[emp.lg]){ const diff = (T.hourly[o.lg]||0) - tim; if (diff > 0){ lgAdd += diff*h; lgAddH += h; } }
+    if (o.dog) dogH += h;
+    shiftRows.push({o, h, obh, type: !monthly ? 'Timlön' : isOrd ? 'Ordinarie' : 'Utöver schema'});
   }
-  for (const c in ob) if (ob[c] > 0.001) L('OB-tillägg ' + OBCATS[c].toLowerCase(), ob[c], S.ob[c]);
-  const absH = {};
-  for (const o of absent){ const r = o.absence || 'ovrigt'; absH[r] = (absH[r]||0) + hoursOf(o); }
-  if (!hourly){
-    if (absH.sjuk){
-      L('Sjukavdrag', absH.sjuk, -tim);
-      L(`Sjuklön ${S.sickPct} %`, absH.sjuk, tim*S.sickPct/100);
-      const veckoSjuklon = (S.sickPct/100) * (mlon*grad/100) * 12 / 52;
-      L(`Karensavdrag (${S.karensPct} % av veckosjuklön)`, null, null, -veckoSjuklon*S.karensPct/100);
-    }
-    if (absH.tjl) L('Avdrag tjänstledighet', absH.tjl, -tim);
-    if (absH.vab) L('Avdrag VAB / föräldraledighet', absH.vab, -tim);
-    for (const r of ['semester','utb','ovrigt']) if (absH[r]) L(`${ABS[r]} (ingen löneändring)`, absH[r], 0, 0, 'info');
+  // Grundlön
+  if (monthly) L(`Månadslön, ${lg?.name||emp.lg}`, null, null, mlon);
+  else if (st.worked.length) L(`Timlön, ${lg?.name||emp.lg}`, st.ordH + st.extraH, tim);
+  // Tillägg
+  if (lgAddH) L('Tillägg pass i högre lönegrupp (§ 3 mom 1 prot. b)', lgAddH, null, lgAdd);
+  for (const c in ob) if (ob[c] > 0.001) L('OB ' + OBCATS[c].toLowerCase(), ob[c], T.ob[c]);
+  if (dogH) L('Tillägg bevakning med hund (§ 3 mom 2:2)', dogH, T.hund);
+  // Förskjuten arbetstid och övertid (heltid, § 4)
+  let q = null;
+  if (monthly){
+    if (st.extraH) L('Förskjuten arbetstid (§ 4 mom 5)', st.extraH, T.forskjuten);
+    q = quarterOT(emp, ctx);
+    if (ctx.qEnd && q.otH > 0.001){
+      L(`Övertid, ${S.otPct} % timlön + månadslön/${num(st.matt)} (§ 4 mom 2–3)`, q.otH, tim*S.otPct/100 + mlon/st.matt);
+      const back = Math.min(q.otH, q.extra); if (back > 0.001) L('Avgår förskjuten arbetstid som ersätts som övertid', back, -T.forskjuten);
+    } else if (!ctx.qEnd) L(`Kvartalsavstämning hittills: ${num(q.counted)} h mot mått ${num(q.matt)} h (övertid regleras i kvartalets sista månad)`, null, null, 0, 'info');
   }
-  if (S.atfMode === 'utbetalning' && atfH > 0.001) L('Arbetstidsförkortning, utbetalning', atfH, tim);
-  if (hourly){
-    const base = lines.filter(l => l.amount > 0).reduce((a,l)=>a+l.amount,0);
-    if (base) L(`Semesterersättning ${S.semErs} %`, null, null, base*S.semErs/100);
+  // Frånvaro
+  let sickBase = 0;
+  for (const o of st.absent) if ((o.absence||'ovrigt')==='sjuk'){ const sp = obSplit(o), f = sp.total ? hoursOf(o)/sp.total : 0; sickBase += hoursOf(o)*tim; for (const c in ob) sickBase += sp[c]*f*T.ob[c]; }
+  const A = st.absH;
+  if (A.sjuk){
+    if (monthly) L('Sjukavdrag, timavdrag (§ 5 mom 1)', A.sjuk, -tim);
+    L(`Sjuklön ${S.sickPct} % inkl. förlorad OB (sjuklönelagen)`, A.sjuk, null, sickBase*S.sickPct/100, 'sick');
+    const weekPay = monthly ? mlon*12/52 : tim*baseMatt(emp)*12/52;
+    if (weekPay) L(`Karensavdrag ${S.karensPct} % av genomsnittlig veckosjuklön`, null, null, -(S.sickPct/100)*weekPay*S.karensPct/100, 'sick');
   }
-  const brutto = r2(lines.reduce((a,l)=>a+l.amount,0));
-  const obH = Object.values(ob).reduce((a,b)=>a+b,0), obKr = Object.keys(ob).reduce((a,c)=>a+ob[c]*S.ob[c],0);
-  const absTot = Object.values(absH).reduce((a,b)=>a+b,0);
-  return {emp, lg, mlon, tim, hourly, grad, ord, extra, enkel, kval, ob, obH, obKr, absH, absTot, atfH, lines, brutto, shiftRows};
-}
-function atfYTD(emp, ym){
-  const [y,m] = ym.split('-').map(Number); let tot = 0;
-  const occs = occurrences(new Date(y,0,1), new Date(y,m,0));
-  for (let i=1;i<=m;i++){ const k = `${y}-${pad(i)}`; tot += calcPay(emp, k, occs.filter(o=>o.date.slice(0,7)===k)).atfH; }
-  return tot;
+  if (monthly){
+    if (A.tjl) L('Avdrag tjänstledighet (§ 5 mom 1)', A.tjl, -tim);
+    if (A.vab) L('Avdrag VAB / föräldraledighet (§ 5 mom 1)', A.vab, -tim);
+    if (A.semester) L('Semester (semesterlön enligt § 11 beräknas inte här)', A.semester, 0, 0, 'info');
+    for (const r of ['utb','ovrigt']) if (A[r]) L(`${ABS[r]}, ingen löneändring`, A[r], 0, 0, 'info');
+  } else {
+    for (const r of ['utb','ovrigt']) if (A[r]) L(`${ABS[r]}: ordinarie pass ersätts med timlön`, A[r], tim);
+    for (const r of ['tjl','vab','semester']) if (A[r]) L(`${ABS[r]}: ingen timlön för ordinarie pass`, A[r], 0, 0, 'info');
+  }
+  // Arbetstidsförkortning för nattarbetande (bilaga 4)
+  if (st.natt && st.atf > 0) L(`Arbetstidsförkortning nattarbetande: mått ${num(st.matt)} h i stället för ${num(st.base)} h (bilaga 4)`, st.atf, null, 0, 'info');
+  // Semesterlön för timavlönade (§ 11 mom 6): 13 % av lönen exkl. sjuklön
+  let semAcc = 0;
+  if (!monthly){
+    const base = lines.filter(l => l.kind==='pay' && l.amount > 0).reduce((s,l)=>s+l.amount,0);
+    semAcc = r2(base*S.semPct/100);
+    if (semAcc) L(S.semMode==='lopande' ? `Semesterlön ${S.semPct} % (§ 11 mom 6)` : `Semesterlön ${S.semPct} % intjänad, utbetalas i maj (§ 11 mom 6)`, null, null, semAcc, S.semMode==='lopande' ? 'pay' : 'accrual');
+  }
+  const brutto = r2(lines.filter(l => l.kind!=='info' && l.kind!=='accrual').reduce((s,l)=>s+l.amount,0));
+  const obH = Object.values(ob).reduce((a,b)=>a+b,0), obKr = Object.keys(ob).reduce((s,c)=>s+ob[c]*T.ob[c],0);
+  const absTot = Object.values(A).reduce((a,b)=>a+b,0);
+  return {emp, lg, T, mlon, tim, monthly, hourly:!monthly, ord:st.ordH, extra:st.extraH, ob, obH, obKr, absH:A, absTot, atfH: st.natt ? st.atf : 0, natt:st.natt, matt:st.matt, q, lines, brutto, shiftRows, semAcc};
 }
 
 /* =========================================================
@@ -693,33 +841,34 @@ async function exportSchedule(kind, from, to, personId){
   }
 }
 function payRows(results){
-  return results.map(p => [p.emp.name, FORMS[p.emp.form].name, p.lg ? p.lg.name : '', p.hourly ? 'Tim' : p.grad+' %', r2(p.ord), r2(p.extra), r2(p.obH), r2(p.obKr), r2(p.absTot), r2(p.atfH), r2(p.brutto)]);
+  return results.map(p => [p.emp.name, empLabel(p.emp), p.lg ? p.lg.name : '', p.monthly ? r2(p.mlon) : r2(p.tim), r2(p.ord), r2(p.extra), r2(p.obH), r2(p.obKr), r2(p.absTot), r2(p.atfH), r2(p.brutto)]);
 }
-const PAY_HEAD = ['Namn','Anställningsform','Lönegrupp','Grad','Ord. tim','Mertid/övertid tim','OB-tim','OB kr','Frånvaro tim','ATF intjänat tim','Bruttolön kr'];
-function specTable(p){ return p.lines.map(l => [l.text, l.qty==null ? '' : num(l.qty), l.price==null ? '' : num(l.price), num(l.amount)]); }
+const PAY_HEAD = ['Namn','Anställning','Lönegrupp','Månads-/timlön','Ordinarie tim','Utöver schema tim','OB-tim','OB kr','Frånvaro tim','ATF tim','Bruttolön kr'];
+const lineAmount = l => l.kind==='accrual' ? `(${num(l.amount)})` : l.kind==='info' && !l.amount ? '' : num(l.amount);
+function specTable(p){ return p.lines.map(l => [l.text, l.qty==null ? '' : num(l.qty), l.price==null || l.kind==='info' ? '' : num(l.price), lineAmount(l)]); }
 async function exportPayroll(kind, ym, onlyId){
   if (!libsOk(kind)) return;
-  const [a,b] = monthRange(ym); const occs = occurrences(a,b);
+  const [a,b] = monthRange(ym); const ctx = payCtx(ym);
   const emps = D.employees.filter(e => !onlyId || e.id===onlyId);
-  const results = emps.map(e => calcPay(e, ym, occs)).filter(p => onlyId || p.brutto || p.ord || p.extra);
+  const results = emps.map(e => calcPay(e, ym, ctx)).filter(p => onlyId || p.brutto || p.ord || p.extra);
   const mname = `${MONTHS[a.getMonth()]} ${a.getFullYear()}`;
   const fname = onlyId ? `Lonespec_${emps[0].name.replace(/\s+/g,'_')}_${ym}` : `Lon_${ym}`;
   if (kind==='pdf'){
-    const doc = pdfDoc(onlyId ? `Lönespecifikation – ${emps[0].name}` : `Lönesammanställning ${mname}`, `Löneperiod ${iso(a)} – ${iso(b)} · Preliminär beräkning enligt inställda avtalsvärden`, !onlyId);
+    const doc = pdfDoc(onlyId ? `Lönespecifikation – ${emps[0].name}` : `Lönesammanställning ${mname}`, `Löneperiod ${iso(a)} – ${iso(b)} · Preliminär beräkning · avtalsnivå ${tariffFor(iso(a)).label}`, !onlyId);
     if (!onlyId){
       const tot = results.reduce((s,p)=>s+p.brutto,0);
       pdfTable(doc, PAY_HEAD, [...payRows(results).map(r => r.map((v,i)=> i>=4 ? num(v) : v)), ['Summa','','','','','','','','','',num(tot)]], 27, {columnStyles:Object.fromEntries([4,5,6,7,8,9,10].map(i=>[i,{halign:'right'}]))});
     }
     results.forEach((p, idx) => {
-      if (!onlyId || idx>0) { doc.addPage('a4','portrait'); pdfHeader(doc, `Lönespecifikation – ${p.emp.name}`, `Löneperiod ${mname} · ${FORMS[p.emp.form].name}${p.hourly?'':' '+p.grad+' %'} · ${p.lg?p.lg.name:''}`); }
+      if (!onlyId || idx>0) { doc.addPage('a4','portrait'); pdfHeader(doc, `Lönespecifikation – ${p.emp.name}`, `Löneperiod ${mname} · ${empLabel(p.emp)} · ${p.lg?p.lg.name:''}`); }
       let y = pdfTable(doc, ['Benämning','Antal','À-pris','Belopp'], [...specTable(p), ['Bruttolön','','',num(p.brutto)]], 27, {columnStyles:{1:{halign:'right'},2:{halign:'right'},3:{halign:'right'}}, didParseCell:d=>{ if (d.section==='body' && d.row.index===p.lines.length) d.cell.styles.fontStyle='bold'; }});
-      doc.setFontSize(9); doc.text(`Arbetstidsförkortning intjänad: ${num(p.atfH)} h (${D.settings.atfMode==='saldo'?'till saldo':'utbetalas'}). Timlön ${num(p.tim)} kr (månadslön ${num(p.mlon)} / ${D.settings.divisor}).`, 14, y+7);
+      doc.setFontSize(9); doc.text(`${p.monthly ? `Månadslön ${num(p.mlon)} kr, timlön ${num(p.tim)} kr enligt lönetabell. Arbetstidsmått ${num(p.matt)} h/mån.` : `Timlön ${num(p.tim)} kr enligt lönetabell.`}${p.natt ? ' Nattarbetande (bilaga 4).' : ''} Belopp inom parentes är intjänade och ingår inte i bruttolönen.`, 14, y+7);
       pdfTable(doc, ['Datum','Pass','Tid','Typ','Timmar','Varav OB'], p.shiftRows.map(r => [r.o.date, `${siteById(r.o.siteId)?.name||''} – ${r.o.name}`, `${fmtT(r.o.start)}–${fmtT(r.o.end)}`, r.type, num(r.h), num(r.obh)]), y+12, {columnStyles:{4:{halign:'right'},5:{halign:'right'}}});
     });
     pdfFooter(doc); await offerFile(fname+'.pdf', doc.output('blob'));
   } else {
     const lines = [['Namn','Benämning','Antal','À-pris','Belopp']];
-    results.forEach(p => { p.lines.forEach(l => lines.push([p.emp.name, l.text, l.qty==null?'':r2(l.qty), l.price==null?'':r2(l.price), l.amount])); lines.push([p.emp.name, 'Bruttolön','','',p.brutto]); });
+    results.forEach(p => { p.lines.forEach(l => lines.push([p.emp.name, l.text + (l.kind==='accrual' ? ' (ingår ej i brutto)' : ''), l.qty==null?'':r2(l.qty), l.price==null||l.kind==='info'?'':r2(l.price), l.amount])); lines.push([p.emp.name, 'Bruttolön','','',p.brutto]); });
     const shifts = [['Namn','Datum','Objekt','Pass','Start','Slut','Typ','Timmar','OB-timmar']];
     results.forEach(p => p.shiftRows.forEach(r => shifts.push([p.emp.name, r.o.date, siteById(r.o.siteId)?.name||'', r.o.name, fmtT(r.o.start), fmtT(r.o.end), r.type, r2(r.h), r2(r.obh)])));
     await offerFile(fname+'.xlsx', xlsxBlob([['Sammanställning', [PAY_HEAD, ...payRows(results)], [20,28,22,7,9,12,8,10,11,12,13]], ['Lönerader', lines, [20,40,9,10,12]], ['Pass', shifts, [20,11,20,22,7,7,10,8,9]]]));
@@ -727,8 +876,8 @@ async function exportPayroll(kind, ym, onlyId){
 }
 async function exportStaff(kind){
   if (!libsOk(kind)) return;
-  const head = ['Namn','Roll','Anställningsform','Grad','Lönegrupp','Behörighet','Från','Till','Telefon','E-post'];
-  const rows = D.employees.map(e => [e.name, e.role==='arbetsledare'?'Arbetsledare':'Personal', FORMS[e.form].name, FORMS[e.form].pay==='hour'?'Tim':e.grad+' %', lgOf(e)?.name||'', (e.certs||[]).map(c=>CERTS[c]).join(', '), e.start||'', e.end||'', e.phone||'', e.email||'']);
+  const head = ['Namn','Roll','Anställningsform','Anställningstyp','Lönegrupp','Behörighet','Från','Till','Telefon','E-post'];
+  const rows = D.employees.map(e => [e.name, e.role==='arbetsledare'?'Arbetsledare':'Personal', FORMS[e.form].name, empType(e), lgOf(e)?.name||'', (e.certs||[]).map(c=>CERTS[c]).join(', '), e.start||'', e.end||'', e.phone||'', e.email||'']);
   if (kind==='pdf'){ const doc = pdfDoc('Personalförteckning', `${rows.length} anställda · ${iso(new Date())}`, true); pdfTable(doc, head, rows); pdfFooter(doc); await offerFile('Personal.pdf', doc.output('blob')); }
   else await offerFile('Personal.xlsx', xlsxBlob([['Personal', [head, ...rows], [20,13,30,6,22,30,11,11,15,28]]]));
 }
@@ -762,7 +911,7 @@ function render(){
     <div class="who"><label for="who">Inloggad som (demo)</label>
       <select id="who" data-chg="who">${D.employees.map(e => `<option value="${e.id}" ${e.id===UI.user?'selected':''}>${esc(e.name)}${e.role==='arbetsledare'?' · arbetsledare':''}</option>`).join('')}</select></div>
     <nav class="nav" aria-label="Huvudmeny">${nav.map(([k,l]) => `<button data-act="nav" data-v="${k}" ${UI.view===k?'aria-current="page"':''}><span>${l}</span>${counts[k] ? `<span class="count ${counts[k][1]}">${counts[k][0]}</span>`:''}</button>`).join('')}</nav>
-    <div class="side-foot">Data sparas lokalt i den här webbläsaren. Siffrorna i inställningarna är exempelvärden.</div>
+    <div class="side-foot">Data sparas lokalt i den här webbläsaren. Belopp och regler enligt Bevakningsavtalet 2013–2016.</div>
   </aside>
   <main class="main" id="main">${VIEWS[UI.view]()}</main>`;
   saveUI();
@@ -790,9 +939,10 @@ function patternText(s){
     while (i < d.length){ let j = i; while (j+1 < d.length && d[j+1]===d[j]+1) j++; parts.push(j>i ? `${WD[d[i]]}–${WD[d[j]]}` : WD[d[i]]); i = j+1; }
     return parts.join(', ') || 'ledigt'; };
   const c = Math.max(1, s.cycle|0);
-  if (c===1) return `${fmt(s.days[0]||[])} varje vecka`;
+  const hol = s.skipHol ? ', ledigt helgdagar' : '';
+  if (c===1) return `${fmt(s.days[0]||[])} varje vecka${hol}`;
   const ord = {2:'varannan vecka',3:'var tredje vecka',4:'var fjärde vecka'}[c] || `var ${c}:e vecka`;
-  return Array.from({length:c}, (_,i) => `V${i+1}: ${fmt(s.days[i]||[])}`).join(' · ') + ` (upprepas ${ord})`;
+  return Array.from({length:c}, (_,i) => `V${i+1}: ${fmt(s.days[i]||[])}`).join(' · ') + ` (upprepas ${ord})${hol}`;
 }
 function seriesWeekHours(s){
   const c = Math.max(1,s.cycle|0); const {start,end} = shiftTimes('2026-01-05', s.from, s.to);
@@ -865,7 +1015,7 @@ VIEWS.schedule = () => {
     for (const e of D.employees){
       const mine = A.occs.filter(o => o.personId===e.id);
       const h = mine.reduce((a,o)=>a+hoursOf(o),0);
-      body += `<tr><th class="rowh"><b>${esc(e.name)}</b><span>${FORMS[e.form].pay==='hour'?'Timavlönad':e.grad+' %'} · ${hrs(h)} h i perioden</span></th>${days.map(d => `<td class="${cellCls(d)}">${mine.filter(o=>o.date===iso(d)).map(o=>chipHtml(o, A.byOcc.get(o.id), 'person')).join('')}</td>`).join('')}</tr>`;
+      body += `<tr><th class="rowh"><b>${esc(e.name)}</b><span>${esc(empType(e))} · ${hrs(h)} h i perioden</span></th>${days.map(d => `<td class="${cellCls(d)}">${mine.filter(o=>o.date===iso(d)).map(o=>chipHtml(o, A.byOcc.get(o.id), 'person')).join('')}</td>`).join('')}</tr>`;
     }
   }
   return `
@@ -887,8 +1037,8 @@ VIEWS.series = () => {
     <div class="toolbar"><button class="btn primary" data-act="newSeries">+ Nytt löpande pass</button></div></div>
   <div class="stack">${bySite.map(g => `
     <section class="panel"><div class="panel-h"><h2>${esc(g.site.name)}</h2><span class="muted small">${esc(g.site.address||'')}</span></div>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pass</th><th>Tid</th><th>Mönster</th><th>Ordinarie</th><th class="n">Snitt h/v</th><th>Period</th><th></th></tr></thead><tbody>
-    ${g.list.map(s => `<tr><td><b>${esc(s.name)}</b>${s.requires?`<div class="muted small">Kräver ${CERTS[s.requires]}</div>`:''}</td><td class="mono">${s.from}–${s.to}${s.breakMin?`<div class="muted small">rast ${s.breakMin} min</div>`:''}</td><td>${esc(patternText(s))}</td><td>${s.personId?esc(empName(s.personId)):'<span class="pill err">Ingen</span>'}</td><td class="n">${hrs(seriesWeekHours(s))}</td><td class="small">${s.start} – ${s.end||'tills vidare'}</td><td><div class="toolbar"><button class="btn sm" data-act="editSeries" data-id="${s.id}">Redigera</button></div>${confirmBox('delSeries:'+s.id, `Ta bort <b>${esc(s.name)}</b> och alla dess undantag?`, 'Ta bort', 'delSeries', `data-id="${s.id}"`)}</td></tr>`).join('')}
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pass</th><th>Tid</th><th>Mönster</th><th>Ordinarie</th><th class="n">Snitt h/mån</th><th>Period</th><th></th></tr></thead><tbody>
+    ${g.list.map(s => `<tr><td><b>${esc(s.name)}</b><div class="muted small">${[s.requires?'Kräver '+CERTS[s.requires]:'', s.lg?'Lönegrupp '+s.lg:'', s.dog?'Med hund':''].filter(Boolean).join(' · ')}</div></td><td class="mono">${s.from}–${s.to}${s.breakMin?`<div class="muted small">rast ${s.breakMin} min</div>`:''}${s.mealPaid?'<div class="muted small">måltidsuppehåll</div>':''}</td><td>${esc(patternText(s))}</td><td>${s.personId?esc(empName(s.personId)):'<span class="pill err">Ingen</span>'}</td><td class="n">${hrs(seriesWeekHours(s)*52/12)}</td><td class="small">${s.start} – ${s.end||'tills vidare'}</td><td><div class="toolbar"><button class="btn sm" data-act="editSeries" data-id="${s.id}">Redigera</button></div>${confirmBox('delSeries:'+s.id, `Ta bort <b>${esc(s.name)}</b> och alla dess undantag?`, 'Ta bort', 'delSeries', `data-id="${s.id}"`)}</td></tr>`).join('')}
     </tbody></table></div></section>`).join('') || '<div class="panel empty">Inga löpande pass ännu.</div>'}</div>`;
 };
 
@@ -910,11 +1060,11 @@ VIEWS.vacant = () => {
 VIEWS.staff = () => {
   const t0 = today0(); const A = analyze(t0, addDays(t0,27));
   return `
-  <div class="page-head"><div><h1>Personal</h1><p>Anställningsformer enligt Bevakningsavtalet. Lönegrupp och sysselsättningsgrad styr lönen.</p></div>
+  <div class="page-head"><div><h1>Personal</h1><p>Anställningsform och anställningstyp enligt Bevakningsavtalet § 1. Lönegrupp och anställningstyp styr lönen (§ 3).</p></div>
     <div class="toolbar"><button class="btn primary" data-act="editEmp" data-id="">+ Ny personal</button><button class="btn" data-act="expStaff" data-k="pdf">PDF</button><button class="btn" data-act="expStaff" data-k="xlsx">Excel</button></div></div>
-  <div class="panel tbl-wrap"><table class="tbl"><thead><tr><th>Namn</th><th>Anställningsform</th><th class="n">Grad</th><th>Lönegrupp</th><th>Behörighet</th><th>Period</th><th class="n">Pass 4 v</th><th></th></tr></thead><tbody>
-  ${D.employees.map(e => { const n = A.occs.filter(o=>o.personId===e.id).length; const expiring = e.end && dayDiff(t0, parseISO(e.end)) <= 30 && dayDiff(t0, parseISO(e.end)) >= 0;
-    return `<tr class="click" data-act="editEmp" data-id="${e.id}"><td><b>${esc(e.name)}</b>${e.role==='arbetsledare'?' <span class="pill info">Arbetsledare</span>':''}<div class="muted small">${esc(e.phone||'')}</div></td><td>${FORMS[e.form].name}</td><td class="n">${FORMS[e.form].pay==='hour'?'Tim':e.grad+' %'}</td><td>${esc(lgOf(e)?.name||'–')}</td><td class="small">${(e.certs||[]).map(c=>CERTS[c]).join(', ')}</td><td class="small">${e.start||'–'} – ${e.end||'tills vidare'}${expiring?' <span class="pill warn">Slutar snart</span>':''}${FORMS[e.form].needsEnd && !e.end?' <span class="pill err">Slutdatum saknas</span>':''}</td><td class="n">${n}</td><td><button class="btn sm">Redigera</button></td></tr>`; }).join('')}
+  <div class="panel tbl-wrap"><table class="tbl"><thead><tr><th>Namn</th><th>Anställningsform</th><th>Anställningstyp</th><th>Lönegrupp</th><th>Behörighet</th><th>Period</th><th class="n">Pass 4 v</th><th></th></tr></thead><tbody>
+  ${D.employees.map(e => { const n = A.occs.filter(o=>o.personId===e.id).length; const fl = empFlags(e);
+    return `<tr class="click" data-act="editEmp" data-id="${e.id}"><td><b>${esc(e.name)}</b>${e.role==='arbetsledare'?' <span class="pill info">Arbetsledare</span>':''}<div class="muted small">${esc(e.phone||'')}</div></td><td>${FORMS[e.form]?.name||''}</td><td>${esc(empType(e))}</td><td>${esc(lgOf(e)?.name||'–')}</td><td class="small">${(e.certs||[]).map(c=>CERTS[c]).join(', ')}</td><td class="small">${e.start||'–'} – ${e.end||'tills vidare'}${fl.map(([l,t])=>` <span class="pill ${l}">${esc(t)}</span>`).join('')}</td><td class="n">${n}</td><td><button class="btn sm">Redigera</button></td></tr>`; }).join('')}
   </tbody></table></div>`;
 };
 
@@ -925,7 +1075,7 @@ VIEWS.rules = () => {
   return `
   <div class="page-head"><div><h1>Regelkontroll</h1><p>Kontroll mot arbetstidslagen och inställda avtalsgränser för alla bemannade pass.</p></div>
     <div class="seg">${[2,4,8].map(n => `<button data-act="ruleWeeks" data-w="${n}" aria-pressed="${w===n}">${n} veckor</button>`).join('')}</div></div>
-  <div class="note" style="margin-bottom:16px">Kontrolleras: passlängd (max ${R.maxShift} h), dygnsvila (${R.minDailyRest} h per 24 h, ATL 13 §), veckovila (${R.minWeeklyRest} h per vecka, ATL 14 §), sammanlagd arbetstid (snitt max ${R.maxAvgWeek} h/vecka över ${R.avgWeeks} veckor, ATL 10 b §), allmän övertid (max ${R.maxOtMonth} h/månad, ATL 8 §), dubbelbokning, anställningsperiod och behörighet. Kollektivavtalet kan medge avvikelser; gränserna ändras under Inställningar.</div>
+  <div class="note" style="margin-bottom:16px">Kontrolleras enligt Bevakningsavtalet och arbetstidsavtalet (bilaga 3): passlängd högst ${R.maxShift} h, ${R.maxShiftOverlap} h vid överlappning (§ 2 mom 4) · minst ${R.minRest} h mellan pass (§ 2 mom 3) · veckovila ${R.minWeeklyRest} h, aldrig under ${R.minWeeklyRestAbs} h (§ 2 mom 2) · högst ${R.maxWeek} h per vecka (§ 2 mom 4) · måltidsrast i pass över ${R.mealAfter} h (§ 2 mom 5) · sammanlagd arbetstid högst ${R.maxAvgWeek} h/vecka i snitt över ${R.avgWeeks} veckor · nattarbetande högst ${R.maxNightAvg} h per 24 h i snitt · allmän övertid högst ${R.maxOtMonth} h/månad. Dessutom dubbelbokning, anställningsperiod och behörighet. Lokal överenskommelse kan medge avsteg; gränserna ändras under Inställningar.</div>
   <div class="stack">
     <section class="panel"><div class="panel-h"><h2>Regelbrott</h2><span class="pill err">${errs.length}</span></div><div>${errs.map(issueRow).join('') || '<div class="empty">Inga regelbrott i perioden.</div>'}</div></section>
     <section class="panel"><div class="panel-h"><h2>Varningar</h2><span class="pill warn">${warns.length}</span></div><div>${warns.map(issueRow).join('') || '<div class="empty">Inga varningar i perioden.</div>'}</div></section>
@@ -933,31 +1083,31 @@ VIEWS.rules = () => {
 };
 
 VIEWS.pay = () => {
-  const ym = UI.payMonth; const [a,b] = monthRange(ym); const occs = occurrences(a,b);
-  const res = D.employees.map(e => calcPay(e, ym, occs));
+  const ym = UI.payMonth; const [a,b] = monthRange(ym); const ctx = payCtx(ym); const T = tariffFor(iso(a));
+  const res = D.employees.map(e => calcPay(e, ym, ctx));
   const tot = k => res.reduce((s,p)=>s+p[k],0);
   return `
-  <div class="page-head"><div><div class="eyebrow">Löneperiod ${iso(a)} – ${iso(b)}</div><h1>Lön ${MONTHS[a.getMonth()]} ${a.getFullYear()}</h1><p>Beräknad på arbetade pass i perioden med lönegrupp, OB, mertid/övertid, frånvaro och arbetstidsförkortning. Klicka på en rad för lönespecifikation.</p></div>
+  <div class="page-head"><div><div class="eyebrow">Löneperiod ${iso(a)} – ${iso(b)} · avtalsnivå ${esc(T.label)}</div><h1>Lön ${MONTHS[a.getMonth()]} ${a.getFullYear()}</h1><p>Beräknad på pass i perioden med lönetabell, OB, förskjuten arbetstid, övertid per kvartal, frånvaro och arbetstidsförkortning enligt Bevakningsavtalet. Klicka på en rad för lönespecifikation.</p></div>
     <div class="toolbar"><input class="inp" style="width:auto" type="month" id="payMonth" value="${ym}" data-chg="payMonth" aria-label="Löneperiod"><button class="btn" data-act="expPay" data-k="pdf">PDF</button><button class="btn" data-act="expPay" data-k="xlsx">Excel</button></div></div>
   <div class="kpis">
     <div class="kpi"><span class="v">${num(tot('brutto')/1000,1)}k</span><span class="l">bruttolön totalt (kr)</span></div>
     <div class="kpi"><span class="v">${num(tot('ord')+tot('extra'),0)}</span><span class="l">arbetade timmar</span></div>
-    <div class="kpi"><span class="v">${num(tot('obKr')/1000,1)}k</span><span class="l">OB-tillägg (kr)</span></div>
-    <div class="kpi"><span class="v">${num(tot('atfH'),1)}</span><span class="l">ATF intjänat (h)</span></div>
+    <div class="kpi"><span class="v">${num(tot('obKr')/1000,1)}k</span><span class="l">ob-tillägg (kr)</span></div>
+    <div class="kpi"><span class="v">${num(tot('semAcc')/1000,1)}k</span><span class="l">intjänad semesterlön timavlönade (kr)</span></div>
   </div>
-  <div class="panel tbl-wrap"><table class="tbl"><thead><tr><th>Namn</th><th>Anställning</th><th class="n">Ord. tim</th><th class="n">Mertid/övertid</th><th class="n">OB-tim</th><th class="n">OB kr</th><th class="n">Frånvaro tim</th><th class="n">ATF tim</th><th class="n">Bruttolön</th></tr></thead><tbody>
-  ${res.map(p => `<tr class="click" data-act="spec" data-id="${p.emp.id}"><td><b>${esc(p.emp.name)}</b><div class="muted small">${esc(p.lg?.name||'')}</div></td><td class="small">${FORMS[p.emp.form].name}${p.hourly?'':' '+p.grad+' %'}</td><td class="n">${hrs(p.ord)}</td><td class="n">${p.extra?hrs(p.extra):'–'}</td><td class="n">${hrs(p.obH)}</td><td class="n">${kr(p.obKr)}</td><td class="n">${p.absTot?hrs(p.absTot):'–'}</td><td class="n">${hrs(p.atfH)}</td><td class="n"><b>${kr(p.brutto)}</b></td></tr>`).join('')}
+  <div class="panel tbl-wrap"><table class="tbl"><thead><tr><th>Namn</th><th>Anställning</th><th class="n">Ordinarie tim</th><th class="n">Utöver schema</th><th class="n">OB-tim</th><th class="n">OB kr</th><th class="n">Frånvaro tim</th><th class="n">ATF tim</th><th class="n">Bruttolön</th></tr></thead><tbody>
+  ${res.map(p => `<tr class="click" data-act="spec" data-id="${p.emp.id}"><td><b>${esc(p.emp.name)}</b><div class="muted small">${esc(p.lg?.name||'')} · ${p.monthly ? kr(p.mlon)+'/mån' : kr(p.tim)+'/h'}</div></td><td class="small">${esc(empType(p.emp))}${p.natt?' <span class="pill info">Natt</span>':''}</td><td class="n">${hrs(p.ord)}</td><td class="n">${p.extra?hrs(p.extra):'–'}</td><td class="n">${hrs(p.obH)}</td><td class="n">${kr(p.obKr)}</td><td class="n">${p.absTot?hrs(p.absTot):'–'}</td><td class="n">${p.atfH?hrs(p.atfH):'–'}</td><td class="n"><b>${kr(p.brutto)}</b></td></tr>`).join('')}
   <tr class="total"><td>Summa</td><td></td><td class="n">${hrs(tot('ord'))}</td><td class="n">${hrs(tot('extra'))}</td><td class="n">${hrs(tot('obH'))}</td><td class="n">${kr(tot('obKr'))}</td><td class="n">${hrs(tot('absTot'))}</td><td class="n">${hrs(tot('atfH'))}</td><td class="n">${kr(tot('brutto'))}</td></tr>
   </tbody></table></div>
-  <p class="note" style="margin-top:12px">Förenklad bruttolöneberäkning före skatt. Belopp för lönegrupper, OB och ATF är exempelvärden och ska stämmas av mot gällande Bevakningsavtal under Inställningar. Semesterlön och semestertillägg för månadsavlönade beräknas inte.</p>`;
+  <p class="note" style="margin-top:12px">Bruttolön före skatt enligt ${esc(D.settings.avtal)}, nivå ${esc(T.label)}. Förenklingar: övertid stäms av per kalenderkvartal mot arbetstidsmåttet och betalas i kvartalets sista månad; frånvaroavdrag görs alltid per timme (§ 5 mom 1 avser frånvaro upp till 14 dagar); semesterlön för månadsavlönade och föräldralön (§ 8) beräknas inte.</p>`;
 };
 
 function specHtml(p, ym){
-  const ytd = atfYTD(p.emp, ym);
-  return `<div class="sect"><dl class="kv"><dt>Anställning</dt><dd>${FORMS[p.emp.form].name}${p.hourly?'':' · '+p.grad+' %'}</dd><dt>Lönegrupp</dt><dd>${esc(p.lg?.name||'–')} · månadslön ${kr(p.mlon)}</dd><dt>Timlön</dt><dd>${kr(p.tim)} (månadslön / ${D.settings.divisor})</dd><dt>ATF</dt><dd>${hrs(p.atfH)} h intjänat i perioden · ${hrs(ytd)} h hittills i år (${D.settings.atfMode==='saldo'?'till ledighetssaldo':'utbetalas'})</dd></dl></div>
+  return `<div class="sect"><dl class="kv"><dt>Anställning</dt><dd>${esc(empLabel(p.emp))}${p.emp.treskift?', kontinuerligt treskift':''}</dd><dt>Lönegrupp</dt><dd>${esc(p.lg?.name||'–')} · ${p.monthly ? `månadslön ${kr(p.mlon)}, timlön ${kr(p.tim)}` : `timlön ${kr(p.tim)}`} (nivå ${esc(p.T.label)})</dd>${p.emp.typ!=='behov'?`<dt>Arbetstidsmått</dt><dd>${hrs(p.matt)} h/mån${p.natt?' · nattarbetande, arbetstidsförkortning '+hrs(p.atfH)+' h (bilaga 4)':''}</dd>`:''}</dl></div>
   <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Benämning</th><th class="n">Antal</th><th class="n">À-pris</th><th class="n">Belopp</th></tr></thead><tbody>
-    ${p.lines.map(l => `<tr><td>${esc(l.text)}</td><td class="n">${l.qty==null?'':hrs(l.qty)}</td><td class="n">${l.price==null?'':kr(l.price)}</td><td class="n">${kr(l.amount)}</td></tr>`).join('')}
+    ${p.lines.map(l => `<tr class="${l.kind==='info'||l.kind==='accrual'?'muted':''}"><td>${esc(l.text)}</td><td class="n">${l.qty==null?'':hrs(l.qty)}</td><td class="n">${l.price==null||l.kind==='info'?'':kr(l.price)}</td><td class="n">${l.kind==='accrual'?'('+kr(l.amount)+')':l.kind==='info'&&!l.amount?'':kr(l.amount)}</td></tr>`).join('')}
     <tr class="total"><td>Bruttolön</td><td></td><td></td><td class="n">${kr(p.brutto)}</td></tr></tbody></table></div>
+  ${p.semAcc && D.settings.semMode!=='lopande' ? '<p class="muted small" style="margin:0">Belopp inom parentes är intjänade men ingår inte i månadens bruttolön.</p>' : ''}
   <details><summary class="lbl" style="cursor:pointer">Pass i perioden (${p.shiftRows.length})</summary>
   <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Datum</th><th>Pass</th><th>Tid</th><th>Typ</th><th class="n">Tim</th><th class="n">varav OB</th></tr></thead><tbody>
     ${p.shiftRows.map(r => `<tr><td>${WD[wdIdx(r.o.start)]} ${fmtD(r.o.start)}</td><td>${esc(r.o.name)} <span class="muted small">${esc(siteById(r.o.siteId)?.name||'')}</span></td><td class="mono">${fmtT(r.o.start)}–${fmtT(r.o.end)}</td><td>${r.type}</td><td class="n">${hrs(r.h)}</td><td class="n">${hrs(r.obh)}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">Inga arbetade pass.</td></tr>'}</tbody></table></div></details>`;
@@ -965,36 +1115,60 @@ function specHtml(p, ym){
 
 VIEWS.settings = () => {
   const S = D.settings, R = S.rules;
+  const list = [...S.tariffs].sort((a,b)=>a.from.localeCompare(b.from));
+  if (UI.tariff == null || !list.some(t=>t.from===UI.tariff)) UI.tariff = list[list.length-1].from;
+  const T = list.find(t=>t.from===UI.tariff); const ti = S.tariffs.indexOf(T);
   const nf = (id, val, step, label, hint) => `<div class="field"><label for="${id}">${label}</label><input id="${id}" type="number" step="${step||'any'}" value="${val}" data-chg="setting" data-path="${id}">${hint?`<span class="hint">${hint}</span>`:''}</div>`;
+  const tf = (f, k, val, label) => `<input class="inp" style="max-width:130px;text-align:right" type="number" step="0.01" id="t_${f}_${k}" value="${val}" data-chg="tariff" data-i="${ti}" data-f="${f}" data-k="${k}" aria-label="${esc(label)}">`;
+  const cur = tariffFor(iso(today0()));
   return `
   <div class="page-head"><div><h1>Inställningar</h1><p>Avtalsvärden, arbetstidsregler och objekt. Ändringar sparas direkt och slår igenom i schema, regelkontroll och lön.</p></div></div>
-  <div class="note" style="margin-bottom:16px">Värdena är exempel för demo. Kontrollera lönegrupper, OB-belopp, övertidsdivisorer och arbetstidsförkortning mot det Bevakningsavtal som gäller för perioden innan lönen används skarpt.</div>
+  <div class="note" style="margin-bottom:16px">Värdena kommer från <b>${esc(S.avtal)}</b>. Lönen räknas med den avtalsnivå som gäller vid löneperiodens början; i dag används nivån från ${esc(cur.label)}. Lägg till en ny avtalsperiod när ett nytt avtal tecknas.</div>
   <div class="stack">
-  <section class="panel"><div class="panel-h"><h2>Lönegrupper</h2><button class="btn sm" data-act="addLg">+ Lönegrupp</button></div>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Kod</th><th>Benämning</th><th class="n">Månadslön (kr)</th><th class="n">Timlön</th><th>Anställda</th><th></th></tr></thead><tbody>
-    ${S.lonegrupper.map((g,i) => { const n = D.employees.filter(e=>e.lg===g.id).length; return `<tr><td class="mono">${esc(g.id)}</td><td><input class="inp" id="lgn${i}" value="${esc(g.name)}" data-chg="lg" data-i="${i}" data-f="name" aria-label="Benämning"></td><td class="n"><input class="inp" style="max-width:130px;text-align:right" type="number" id="lgs${i}" value="${g.salary}" data-chg="lg" data-i="${i}" data-f="salary" aria-label="Månadslön"></td><td class="n">${kr(g.salary/S.divisor)}</td><td>${n}</td><td>${n?'':`<button class="btn sm ghost" data-act="delLg" data-i="${i}">Ta bort</button>`}</td></tr>`; }).join('')}
-    </tbody></table></div></section>
-  <section class="panel"><div class="panel-h"><h2>OB-tillägg och arbetstidsförkortning</h2></div><div class="panel-b stack">
-    <div class="form">${Object.keys(OBCATS).map(c => nf('ob.'+c, S.ob[c], '0.01', 'OB '+OBCATS[c].toLowerCase()+' kr/h')).join('')}</div>
-    <div class="form">${Object.keys(OBCATS).map(c => nf('atf.'+c, S.atf[c], '0.1', 'ATF min per tim, '+c)).join('')}
-      <div class="field"><label for="atfMode">Arbetstidsförkortning</label><select id="atfMode" data-chg="setting" data-path="atfMode"><option value="saldo" ${S.atfMode==='saldo'?'selected':''}>Läggs som ledighet (saldo)</option><option value="utbetalning" ${S.atfMode==='utbetalning'?'selected':''}>Betalas ut som lön</option></select></div></div>
-    <p class="hint muted small" style="margin:0">Högsta tillämpliga OB-kategori gäller per minut: storhelg (påsk, midsommar, jul, nyår) före helg (lör–sön och övriga helgdagar), natt (22–06) och kväll (mån–fre 18–22).</p>
-  </div></section>
-  <section class="panel"><div class="panel-h"><h2>Lönefaktorer</h2></div><div class="panel-b"><div class="form">
-    ${nf('divisor', S.divisor, '1', 'Timlönedivisor', 'Timlön = månadslön / divisor')}
-    ${nf('otEnkel', S.otEnkel, '1', 'Övertid enkel, divisor', 'Per timme: månadslön / divisor')}
-    ${nf('otKval', S.otKval, '1', 'Övertid kvalificerad, divisor')}
-    ${nf('semErs', S.semErs, '0.1', 'Semesterersättning timavlönade %')}
-    ${nf('sickPct', S.sickPct, '1', 'Sjuklön %')}
+  <section class="panel"><div class="panel-h"><h2>Löner och tillägg per avtalsperiod</h2><div class="toolbar"><button class="btn sm" data-act="addTariff">+ Ny avtalsperiod</button>${list.length>1?`<button class="btn sm ghost" data-act="askDelTariff">Ta bort vald period</button>`:''}</div></div>
+    <div class="panel-b stack">
+      <div class="toolbar"><div class="seg">${list.map(t => `<button data-act="pickTariff" data-f="${t.from}" aria-pressed="${t.from===UI.tariff}">fr.o.m. ${t.from}</button>`).join('')}</div>
+        <div class="field" style="min-width:160px"><label for="tFrom">Gäller från</label><input id="tFrom" type="date" value="${T.from}" data-chg="tariffFrom" data-i="${ti}"></div></div>
+      ${confirmBox('delTariff', `Ta bort avtalsperioden fr.o.m. ${T.from}?`, 'Ta bort', 'delTariff', `data-i="${ti}"`)}
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Lönegrupp (§ 3 mom 1)</th><th class="n">Månadslön heltid</th><th class="n">Timlön halvtid/deltid/behov</th><th class="n">Anställda</th></tr></thead><tbody>
+      ${LG.map(g => `<tr><td><b>${g.name}</b><div class="muted small">${esc(g.desc)}</div></td><td class="n">${tf('salary', g.id, T.salary[g.id], g.name+' månadslön')}</td><td class="n">${tf('hourly', g.id, T.hourly[g.id], g.name+' timlön')}</td><td class="n">${D.employees.filter(e=>e.lg===g.id).length}</td></tr>`).join('')}
+      </tbody></table></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Ob-tillägg (§ 3 mom 2) och övriga tillägg</th><th>Tider</th><th class="n">kr/h</th></tr></thead><tbody>
+        <tr><td>a) Kväll och natt</td><td class="small">18–06 helgfri vardag. Natt mot helgfri vardag ger ob till passets slut, längst till 08 (fr.o.m. 2015).</td><td class="n">${tf('ob','kvallnatt',T.ob.kvallnatt,'Kväll och natt')}</td></tr>
+        <tr><td>b) Lör-, sön- och helgdag</td><td class="small">06–18 lördag, söndag och helgdag.</td><td class="n">${tf('ob','helgdag',T.ob.helgdag,'Helgdag')}</td></tr>
+        <tr><td>b1) Helgnatt</td><td class="small">18–06 natt mot lördag, söndag och måndag samt natt mot och efter annan helgdag.</td><td class="n">${tf('ob','helgnatt',T.ob.helgnatt,'Helgnatt')}</td></tr>
+        <tr><td>c) Storhelg</td><td class="small">Nyårsdagen 06 – 2 jan 06, skärtorsdag 18 – tredjedag påsk 06, pingstafton 06 – dagen efter pingstdagen 06, midsommardagen 06 – dagen efter 06, nationaldagen 06 – dagen efter 06, juldagen 06 – tredjedag jul 06.</td><td class="n">${tf('ob','storhelg',T.ob.storhelg,'Storhelg')}</td></tr>
+        <tr><td>d) Jul-, nyårs- och midsommarafton</td><td class="small">Aftonen 06 – dagen efter 06.</td><td class="n">${tf('ob','afton',T.ob.afton,'Afton')}</td></tr>
+        <tr><td>Förskjuten arbetstid (§ 4 mom 5)</td><td class="small">Heltid, beordrat arbete utanför schemat som inte är övertid.</td><td class="n">${tf('forskjuten','',T.forskjuten,'Förskjuten arbetstid')}</td></tr>
+        <tr><td>Bevakning med hund (§ 3 mom 2:2)</td><td class="small">Per bevakningstimme med hund.</td><td class="n">${tf('hund','',T.hund,'Hundtillägg')}</td></tr>
+      </tbody></table></div>
+    </div></section>
+  <section class="panel"><div class="panel-h"><h2>Arbetstidsmått, övertid och frånvaro</h2></div><div class="panel-b"><div class="form">
+    ${nf('heltidMatt', S.heltidMatt, '0.01', 'Heltid h/mån', '§ 2 mom 1')}
+    ${nf('treskiftMatt', S.treskiftMatt, '0.01', 'Heltid kontinuerligt treskift h/mån', '§ 2 mom 1')}
+    ${nf('nattMatt', S.nattMatt, '0.1', 'Heltid nattarbetande h/mån', 'Bilaga 4, proportioneras vid deltid')}
+    ${nf('nattAndel', S.nattAndel, '1', 'Nattarbetande: andel tid 22–06 över %', 'Bilaga 4')}
+    ${nf('halvtidMin', S.halvtidMin, '0.01', 'Halvtid minst h/mån', '§ 1 mom 4')}
+    ${nf('halvtidMinTreskift', S.halvtidMinTreskift, '0.01', 'Halvtid minst h/mån, treskift')}
+    ${nf('otPct', S.otPct, '1', 'Övertidstillägg % av timlön', '§ 4 mom 2, plus månadslön/mått')}
+    ${nf('semPct', S.semPct, '0.1', 'Semesterlön %', '§ 11 mom 6')}
+    <div class="field"><label for="semMode">Semesterlön timavlönade</label><select id="semMode" data-chg="setting" data-path="semMode"><option value="intjanad" ${S.semMode!=='lopande'?'selected':''}>Redovisas som intjänad, utbetalas i maj</option><option value="lopande" ${S.semMode==='lopande'?'selected':''}>Betalas ut löpande varje månad</option></select></div>
+    ${nf('sickPct', S.sickPct, '1', 'Sjuklön %', 'Sjuklönelagen, § 7')}
     ${nf('karensPct', S.karensPct, '1', 'Karensavdrag % av veckosjuklön')}
   </div></div></section>
   <section class="panel"><div class="panel-h"><h2>Arbetstidsregler</h2></div><div class="panel-b"><div class="form">
-    ${nf('rules.maxShift', R.maxShift, '0.5', 'Max passlängd (h)')}
-    ${nf('rules.minDailyRest', R.minDailyRest, '0.5', 'Dygnsvila (h per 24 h)', 'ATL 13 §: 11 h')}
-    ${nf('rules.minWeeklyRest', R.minWeeklyRest, '1', 'Veckovila (h per 7 dagar)', 'ATL 14 §: 36 h')}
-    ${nf('rules.maxAvgWeek', R.maxAvgWeek, '1', 'Max snitt h/vecka', 'ATL 10 b §: 48 h')}
-    ${nf('rules.avgWeeks', R.avgWeeks, '1', 'Snittperiod (veckor)')}
-    ${nf('rules.maxOtMonth', R.maxOtMonth, '1', 'Max övertid per månad (h)', 'ATL 8 §: 50 h')}
+    ${nf('rules.maxShift', R.maxShift, '0.5', 'Max passlängd (h)', '§ 2 mom 4: 12 h')}
+    ${nf('rules.maxShiftOverlap', R.maxShiftOverlap, '0.5', 'Max passlängd vid överlappning (h)', '§ 2 mom 4: 13 h')}
+    ${nf('rules.minRest', R.minRest, '0.5', 'Uppehåll mellan pass (h)', '§ 2 mom 3: 11 h')}
+    ${nf('rules.minWeeklyRest', R.minWeeklyRest, '1', 'Veckovila (h per 7 dygn)', '§ 2 mom 2: 35 h')}
+    ${nf('rules.minWeeklyRestAbs', R.minWeeklyRestAbs, '1', 'Veckovila, absolut minimum (h)', '§ 2 mom 2: 24 h')}
+    ${nf('rules.maxWeek', R.maxWeek, '1', 'Max arbetstid per vecka (h)', '§ 2 mom 4: 52 h')}
+    ${nf('rules.mealAfter', R.mealAfter, '0.5', 'Måltidsrast krävs i pass över (h)', '§ 2 mom 5: 5 h')}
+    ${nf('rules.minMeal', R.minMeal, '5', 'Minsta måltidsrast (min)', '§ 2 mom 5: 30 min')}
+    ${nf('rules.maxAvgWeek', R.maxAvgWeek, '1', 'Sammanlagd arbetstid, snitt h/vecka', 'Bilaga 3: 48 h')}
+    ${nf('rules.avgWeeks', R.avgWeeks, '1', 'Snittperiod (veckor)', 'Bilaga 3: 4 månader ≈ 17 v')}
+    ${nf('rules.maxNightAvg', R.maxNightAvg, '0.5', 'Nattarbetande, snitt h per 24 h', 'Bilaga 3, 2 §: 8 h')}
+    ${nf('rules.maxOtMonth', R.maxOtMonth, '1', 'Allmän övertid per månad (h)', 'Bilaga 3, 3 §: 50 h')}
   </div></div></section>
   <section class="panel"><div class="panel-h"><h2>Objekt</h2><button class="btn sm" data-act="addSite">+ Objekt</button></div>
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Namn</th><th>Adress</th><th>Pass</th><th></th></tr></thead><tbody>
@@ -1017,7 +1191,7 @@ VIEWS.mine = () => {
   const weeks = []; for (let w=0; w<6; w++){ const ws = addDays(from, w*7); weeks.push({ws, list: mine.filter(o => iso(mondayOf(o.start))===iso(ws))}); }
   const absent = A.occs.filter(o => o.ordinaryId===e.id && o.personId!==e.id && o.status!=='cancelled');
   return `
-  <div class="page-head"><div><div class="eyebrow">${esc(e.name)} · ${FORMS[e.form].name}${FORMS[e.form].pay==='hour'?'':' '+e.grad+' %'}</div><h1>Mitt schema</h1><p>Dina pass de kommande sex veckorna.</p></div>
+  <div class="page-head"><div><div class="eyebrow">${esc(e.name)} · ${esc(empLabel(e))}</div><h1>Mitt schema</h1><p>Dina pass de kommande sex veckorna.</p></div>
     <div class="toolbar"><button class="btn" data-act="expMine" data-k="pdf">PDF</button><button class="btn" data-act="expMine" data-k="xlsx">Excel</button></div></div>
   <div class="stack">${weeks.map(w => `<section class="panel"><div class="panel-h"><h2>Vecka ${isoWeek(w.ws)}</h2><span class="muted small">${fmtD(w.ws)} – ${fmtD(addDays(w.ws,6))} · ${hrs(w.list.reduce((a,o)=>a+hoursOf(o),0))} h</span></div>
     <div class="list">${w.list.map(o => { const is = A.byOcc.get(o.id)||[]; return `<div class="item"><div class="main-t"><b>${WD[wdIdx(o.start)]} ${fmtD(o.start)}</b> <span class="mono">${fmtT(o.start)}–${fmtT(o.end)}</span> · ${esc(o.name)} <div class="meta">${esc(siteById(o.siteId)?.name||'')} · ${hrs(hoursOf(o))} h${holiday(o.start)?' · '+esc(holiday(o.start).name):''}</div>${issuesHtml(is)}</div>${statusPill(o)}</div>`; }).join('') || '<div class="empty">Inga pass.</div>'}</div></section>`).join('')}
@@ -1111,7 +1285,7 @@ function parsePattern(txt){
 function seriesDialog(id){
   const s = id ? seriesById(id) : null;
   const t0 = today0();
-  UI.draft = s ? JSON.parse(JSON.stringify(s)) : {id:'', name:'', siteId:D.sites[0]?.id||'', from:'18:00', to:'06:00', breakMin:0, cycle:2, days:[[0,1,4,5,6],[2,3]], start:iso(mondayOf(t0)), end:'', personId:'', requires:'vaktare'};
+  UI.draft = s ? JSON.parse(JSON.stringify(s)) : {id:'', name:'', siteId:D.sites[0]?.id||'', from:'18:00', to:'06:00', breakMin:60, mealPaid:false, dog:false, lg:'B', cycle:2, days:[[0,1,4,5,6],[2,3]], start:iso(mondayOf(t0)), end:'', personId:'', requires:'vaktare'};
   showModal(() => {
     const d = UI.draft; const c = Math.max(1,d.cycle|0);
     while (d.days.length < c) d.days.push([]);
@@ -1120,7 +1294,11 @@ function seriesDialog(id){
     const prev = []; for (let x = new Date(prevFrom), i=0; i<28 && prev.length<10; i++, x = addDays(x,1)) if (d.start && seriesOccursOn(d, x)) prev.push(x);
     const wh = seriesWeekHours(d);
     const pEmp = empById(d.personId);
-    const capH = pEmp && FORMS[pEmp.form].pay==='month' ? 40*(pEmp.grad||0)/100 : null;
+    const mh = wh*52/12;
+    const sp = (() => { const {start,end} = shiftTimes('2026-01-07', d.from, d.to); return obSplit({start, end}); })();
+    const nightSeries = sp.total && sp.natt22/sp.total*100 > D.settings.nattAndel;
+    const capM = pEmp && pEmp.typ!=='behov' ? (nightSeries ? nightMatt(pEmp) : baseMatt(pEmp)) : null;
+    const len = sp.total/60;
     return `
     <div class="dlg-h"><div><div class="eyebrow">${s?'Redigera':'Nytt'} löpande pass</div><h2>${esc(d.name||'Namnlöst pass')}</h2></div><button class="btn ghost" data-act="closeModal" aria-label="Stäng">✕</button></div>
     <div class="dlg-b">
@@ -1135,18 +1313,20 @@ function seriesDialog(id){
         <div class="field"><label for="dSite">Objekt</label><select id="dSite" data-chg="draft">${D.sites.map(x=>`<option value="${x.id}" ${x.id===d.siteId?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
         <div class="field"><label for="dFrom">Starttid</label><input id="dFrom" type="time" value="${d.from}" data-chg="draft"></div>
         <div class="field"><label for="dTo">Sluttid</label><input id="dTo" type="time" value="${d.to}" data-chg="draft"><span class="hint">Tidigare än start = slutar nästa dygn</span></div>
-        <div class="field"><label for="dBreak">Obetald rast (min)</label><input id="dBreak" type="number" min="0" step="5" value="${d.breakMin||0}" data-chg="draft"></div>
+        <div class="field"><label for="dBreak">Måltidsrast, obetald (min)</label><input id="dBreak" type="number" min="0" step="5" value="${d.breakMin||0}" data-chg="draft"></div>
         <div class="field"><label for="dReq">Behörighetskrav</label><select id="dReq" data-chg="draft"><option value="">Inget</option>${Object.entries(CERTS).map(([k,v])=>`<option value="${k}" ${d.requires===k?'selected':''}>${v}</option>`).join('')}</select></div>
         <div class="field"><label for="dStart">Gäller från</label><input id="dStart" type="date" value="${d.start}" data-chg="draft"><span class="hint">Cykelns vecka 1 = v.${isoWeek(anchor)}</span></div>
         <div class="field"><label for="dEnd">Gäller till</label><input id="dEnd" type="date" value="${d.end||''}" data-chg="draft"><span class="hint">Tomt = tills vidare</span></div>
         <div class="field"><label for="dCycle">Upprepning</label><select id="dCycle" data-chg="draft">${[[1,'Varje vecka'],[2,'Varannan vecka (2-veckorscykel)'],[3,'3-veckorscykel'],[4,'4-veckorscykel'],[6,'6-veckorscykel']].map(([v,l])=>`<option value="${v}" ${c===v?'selected':''}>${l}</option>`).join('')}</select></div>
         <div class="field"><label for="dPerson">Ordinarie person</label><select id="dPerson" data-chg="draft">${empOptions(d.personId, true, '— Ingen (passen blir vakanta) —')}</select></div>
+        <div class="field"><label for="dLg">Passets lönegrupp</label><select id="dLg" data-chg="draft"><option value="">Ingen särskild</option>${LG.filter(g=>LG_RANK[g.id]>=2).map(g=>`<option value="${g.id}" ${d.lg===g.id?'selected':''}>${g.name}</option>`).join('')}</select><span class="hint">Pass i högre grupp än personens ger tillägg (§ 3 mom 1 prot. b)</span></div>
+        <div class="field"><span class="lbl">Övrigt</span><div class="checks"><label><input type="checkbox" id="dMeal" data-chg="draft" ${d.mealPaid?'checked':''}>Måltidsuppehåll på arbetsplatsen (betalt)</label><label><input type="checkbox" id="dDog" data-chg="draft" ${d.dog?'checked':''}>Bevakning med hund</label><label><input type="checkbox" id="dHol" data-chg="draft" ${d.skipHol?'checked':''}>Ledigt på helgdagar</label></div></div>
       </div>
       <div class="sect"><span class="lbl">Dagar i cykeln</span>
         <div class="tbl-wrap"><table class="matrix"><thead><tr><th></th>${WD.map(w=>`<th>${w}</th>`).join('')}</tr></thead><tbody>
         ${Array.from({length:c}, (_,w) => `<tr><td>Vecka ${w+1}${c>1?` <span class="muted small">(v.${isoWeek(addDays(anchor,7*w))}, v.${isoWeek(addDays(anchor,7*(w+c)))} …)</span>`:''}</td>${WD.map((_,i)=>`<td><input type="checkbox" id="dd${w}_${i}" aria-label="Vecka ${w+1} ${WD_LONG[i]}" data-chg="draftDay" data-w="${w}" data-d="${i}" ${(d.days[w]||[]).includes(i)?'checked':''}></td>`).join('')}</tr>`).join('')}
         </tbody></table></div>
-        <div class="note"><b>${esc(patternText(d))}</b> · i snitt ${hrs(wh)} h/vecka${capH!=null?` · ordinarie personens grad motsvarar ${hrs(capH)} h/vecka`:''}<br>Nästa pass: ${prev.map(x=>`${WD[wdIdx(x)]} ${fmtD(x)}`).join(', ') || 'inga inom 4 veckor'}</div>
+        <div class="note"><b>${esc(patternText(d))}</b> · ${hrs(len)} h pass, ${hrs(wh)} h arbetstid/vecka, ${hrs(mh)} h/mån i snitt${nightSeries?' · nattpass (mer än hälften 22–06)':''}${capM!=null?` · ${esc(pEmp.name)} har arbetstidsmått ${hrs(capM)} h/mån${mh > capM + 0.05 ? ` <b style="color:var(--warn)">– schemat överskrider måttet med ${hrs(mh-capM)} h/mån, vilket blir övertid (§ 4 mom 3)</b>` : ''}`:''}${len > D.settings.rules.maxShift ? ` <b style="color:var(--warn)">– passlängd över ${D.settings.rules.maxShift} h (§ 2 mom 4)</b>`:''}${len > D.settings.rules.mealAfter && !d.mealPaid && (d.breakMin||0) < D.settings.rules.minMeal ? ` <b style="color:var(--warn)">– måltidsrast saknas (§ 2 mom 5)</b>`:''}<br>Nästa pass: ${prev.map(x=>`${WD[wdIdx(x)]} ${fmtD(x)}`).join(', ') || 'inga inom 4 veckor'}</div>
       </div>
       ${UI.formErr?`<div class="issues-box"><div class="row err">${esc(UI.formErr)}</div></div>`:''}
     </div>
@@ -1157,7 +1337,8 @@ function syncDraft(){
   const d = UI.draft; if (!d) return; const v = id => { const el = document.getElementById(id); return el ? el.value : undefined; };
   d.name = v('dName') ?? d.name; d.siteId = v('dSite') ?? d.siteId; d.from = v('dFrom') || d.from; d.to = v('dTo') || d.to;
   d.breakMin = Math.max(0, +(v('dBreak') ?? d.breakMin) || 0); d.requires = v('dReq') ?? d.requires; d.start = v('dStart') ?? d.start; d.end = v('dEnd') ?? d.end;
-  d.cycle = +(v('dCycle') ?? d.cycle) || 1; d.personId = v('dPerson') ?? d.personId;
+  d.cycle = +(v('dCycle') ?? d.cycle) || 1; d.personId = v('dPerson') ?? d.personId; d.lg = v('dLg') ?? d.lg;
+  const cb = id => { const el = document.getElementById(id); return el ? el.checked : undefined; }; d.mealPaid = cb('dMeal') ?? d.mealPaid; d.dog = cb('dDog') ?? d.dog; d.skipHol = cb('dHol') ?? d.skipHol;
 }
 
 function singleDialog(){
@@ -1170,7 +1351,9 @@ function singleDialog(){
       <div class="field"><label for="xDate">Datum</label><input id="xDate" type="date" value="${iso(addDays(t0,1))}"></div>
       <div class="field"><label for="xFrom">Starttid</label><input id="xFrom" type="time" value="18:00"></div>
       <div class="field"><label for="xTo">Sluttid</label><input id="xTo" type="time" value="23:00"></div>
-      <div class="field"><label for="xBreak">Obetald rast (min)</label><input id="xBreak" type="number" min="0" step="5" value="0"></div>
+      <div class="field"><label for="xBreak">Måltidsrast, obetald (min)</label><input id="xBreak" type="number" min="0" step="5" value="0"></div>
+      <div class="field"><label for="xLg">Passets lönegrupp</label><select id="xLg"><option value="">Ingen särskild</option>${LG.filter(g=>LG_RANK[g.id]>=2).map(g=>`<option value="${g.id}" ${g.id==='B'?'selected':''}>${g.name}</option>`).join('')}</select></div>
+      <div class="field"><span class="lbl">Övrigt</span><div class="checks"><label><input type="checkbox" id="xMeal" checked>Måltidsuppehåll på arbetsplatsen (betalt)</label><label><input type="checkbox" id="xDog">Bevakning med hund</label></div></div>
       <div class="field"><label for="xReq">Behörighetskrav</label><select id="xReq"><option value="">Inget</option>${Object.entries(CERTS).map(([k,v])=>`<option value="${k}" ${k==='vaktare'?'selected':''}>${v}</option>`).join('')}</select></div>
       <div class="field"><label for="xCount">Antal pass</label><input id="xCount" type="number" min="1" max="20" value="1"></div>
       <div class="field"><label for="xMode">Bemanning</label><select id="xMode"><option value="open">Lägg ut som fritt att boka</option><option value="vacant">Vakant (tilldelas senare)</option>${D.employees.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select></div>
@@ -1178,33 +1361,55 @@ function singleDialog(){
     <div class="dlg-f"><button class="btn" data-act="closeModal">Avbryt</button><button class="btn primary" data-act="saveSingle">Skapa</button></div>`);
 }
 
+function suggestLg(start, cur){
+  if (!start) return null; const m = monthsBetween(parseISO(start), today0());
+  if (m < 6) return {ids:['N'], text:'Under 6 månaders anställning: nyanställningslön.'};
+  if (m < 15) return {ids:['G'], text:'6–15 månaders anställning: grundlön.'};
+  return {ids:['B','C','D','E'], text:'Över 15 månaders anställning: ingrupperas i B–E efter arbetsuppgifter (§ 3 mom 1, bilaga 2).'};
+}
 function empDialog(id){
-  const e = id ? empById(id) : {id:'', name:'', role:'personal', form:'tv', grad:100, lg:D.settings.lonegrupper[0]?.id, certs:['vaktare'], start:iso(today0()), end:'', phone:'', email:''};
-  UI.empForm = e.form;
+  const e = id ? empById(id) : {id:'', name:'', role:'personal', form:'tv', typ:'heltid', matt:0, treskift:false, lg:'N', certs:['vaktare'], start:iso(today0()), end:'', phone:'', email:''};
+  UI.empDraft = JSON.parse(JSON.stringify(e));
   showModal(() => {
-    const form = UI.empForm; const F = FORMS[form];
+    const x = UI.empDraft, F = FORMS[x.form], Ty = TYPES[x.typ], S = D.settings;
     const ser = id ? D.series.filter(s=>s.personId===id) : [];
+    const sug = suggestLg(x.start, x.lg);
+    const T = tariffFor(iso(today0()));
+    const hasMatt = x.typ==='halvtid' || x.typ==='deltid';
+    const minH = x.treskift ? S.halvtidMinTreskift : S.halvtidMin;
     return `
-    <div class="dlg-h"><div><div class="eyebrow">${id?'Redigera':'Ny'} personal</div><h2>${esc(e.name||'Ny anställd')}</h2></div><button class="btn ghost" data-act="closeModal" aria-label="Stäng">✕</button></div>
+    <div class="dlg-h"><div><div class="eyebrow">${id?'Redigera':'Ny'} personal</div><h2>${esc(x.name||'Ny anställd')}</h2></div><button class="btn ghost" data-act="closeModal" aria-label="Stäng">✕</button></div>
     <div class="dlg-b"><div class="form">
-      <div class="field"><label for="eName">Namn</label><input id="eName" value="${esc(e.name)}"></div>
-      <div class="field"><label for="eRole">Roll</label><select id="eRole"><option value="personal" ${e.role==='personal'?'selected':''}>Personal</option><option value="arbetsledare" ${e.role==='arbetsledare'?'selected':''}>Arbetsledare</option></select></div>
-      <div class="field"><label for="eForm">Anställningsform</label><select id="eForm" data-chg="empForm">${Object.entries(FORMS).map(([k,v])=>`<option value="${k}" ${form===k?'selected':''}>${v.name}</option>`).join('')}</select>
-        <span class="hint">${form==='prov'?'Högst 6 månader, övergår annars i tillsvidareanställning.':form==='behov'?'Arbetar vid behov, timlön och semesterersättning.':form==='sv'?'Särskild visstidsanställning, LAS 5 §.':F.needsEnd?'Tidsbegränsad: ange slutdatum.':'Gäller tills vidare.'}</span></div>
-      <div class="field"><label for="eGrad">Sysselsättningsgrad %</label><input id="eGrad" type="number" min="0" max="100" step="5" value="${F.pay==='hour'?0:e.grad}" ${F.pay==='hour'?'disabled':''}><span class="hint">100 = heltid, under 100 = deltid</span></div>
-      <div class="field"><label for="eLg">Lönegrupp</label><select id="eLg">${D.settings.lonegrupper.map(g=>`<option value="${g.id}" ${g.id===e.lg?'selected':''}>${esc(g.name)} (${num(g.salary,0)} kr)</option>`).join('')}</select></div>
-      <div class="field"><span class="lbl">Behörighet</span><div class="checks">${Object.entries(CERTS).map(([k,v])=>`<label><input type="checkbox" id="ec_${k}" ${(e.certs||[]).includes(k)?'checked':''}>${v}</label>`).join('')}</div></div>
-      <div class="field"><label for="eStart">Anställd från</label><input id="eStart" type="date" value="${e.start||''}"></div>
-      <div class="field"><label for="eEnd">Anställd till</label><input id="eEnd" type="date" value="${e.end||''}"><span class="hint">${F.needsEnd?'Krävs för tidsbegränsad anställning':'Lämna tomt'}</span></div>
-      <div class="field"><label for="ePhone">Telefon</label><input id="ePhone" value="${esc(e.phone||'')}"></div>
-      <div class="field"><label for="eEmail">E-post</label><input id="eEmail" type="email" value="${esc(e.email||'')}"></div>
+      <div class="field"><label for="eName">Namn</label><input id="eName" value="${esc(x.name)}" data-chg="empDraft"></div>
+      <div class="field"><label for="eRole">Roll i appen</label><select id="eRole" data-chg="empDraft"><option value="personal" ${x.role==='personal'?'selected':''}>Personal</option><option value="arbetsledare" ${x.role==='arbetsledare'?'selected':''}>Arbetsledare</option></select></div>
+      <div class="field"><label for="eForm">Anställningsform</label><select id="eForm" data-chg="empDraft">${Object.entries(FORMS).map(([k,v])=>`<option value="${k}" ${x.form===k?'selected':''}>${v.name}</option>`).join('')}</select>
+        <span class="hint">${x.form==='prov'?'Högst 6 månader. Övergår i tillsvidareanställning om besked inte lämnats (§ 1 mom 1).':x.form==='viss'?'När behov av extra arbetskraft föreligger (§ 1 mom 2). Ange slutdatum.':'Gäller tills vidare.'}</span></div>
+      <div class="field"><label for="eTyp">Anställningstyp</label><select id="eTyp" data-chg="empDraft">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}" ${x.typ===k?'selected':''}>${v.name}</option>`).join('')}</select><span class="hint">${Ty.hint}</span></div>
+      ${hasMatt ? `<div class="field"><label for="eMatt">Arbetstidsmått h/mån</label><input id="eMatt" type="number" min="1" step="0.1" value="${x.matt||''}" data-chg="empDraft"><span class="hint">${x.typ==='halvtid' ? `Minst ${num(minH)} h, under ${num(baseMatt({typ:'heltid', treskift:x.treskift}))} h` : `Under ${num(minH)} h`}</span></div>` : ''}
+      ${x.typ!=='behov' ? `<div class="field"><span class="lbl">Schema</span><div class="checks"><label><input type="checkbox" id="eTre" data-chg="empDraft" ${x.treskift?'checked':''}>Kontinuerligt treskift</label></div></div>` : ''}
+      <div class="field"><label for="eLg">Lönegrupp</label><select id="eLg" data-chg="empDraft">${LG.map(g=>`<option value="${g.id}" ${g.id===x.lg?'selected':''}>${g.name} (${x.typ==='heltid' ? num(T.salary[g.id],0)+' kr/mån' : num(T.hourly[g.id])+' kr/h'})</option>`).join('')}</select>
+        <span class="hint">${esc(LG.find(g=>g.id===x.lg)?.desc||'')}${sug && !sug.ids.includes(x.lg) ? ` <b style="color:var(--warn)">${esc(sug.text)}</b>` : ''}</span></div>
+      <div class="field"><span class="lbl">Behörighet</span><div class="checks">${Object.entries(CERTS).map(([k,v])=>`<label><input type="checkbox" id="ec_${k}" data-chg="empDraft" ${(x.certs||[]).includes(k)?'checked':''}>${v}</label>`).join('')}</div></div>
+      <div class="field"><label for="eStart">Anställd från</label><input id="eStart" type="date" value="${x.start||''}" data-chg="empDraft"></div>
+      <div class="field"><label for="eEnd">Anställd till</label><input id="eEnd" type="date" value="${x.end||''}" data-chg="empDraft"><span class="hint">${F.needsEnd?'Krävs för tidsbegränsad anställning':'Lämna tomt'}</span></div>
+      <div class="field"><label for="ePhone">Telefon</label><input id="ePhone" value="${esc(x.phone||'')}" data-chg="empDraft"></div>
+      <div class="field"><label for="eEmail">E-post</label><input id="eEmail" type="email" value="${esc(x.email||'')}" data-chg="empDraft"></div>
     </div>
-    ${ser.length?`<div class="note">Ordinarie på: ${ser.map(s=>`${esc(s.name)} (${esc(siteById(s.siteId)?.name||'')})`).join(', ')}</div>`:''}
+    ${ser.length?`<div class="note">Ordinarie på: ${ser.map(s=>`${esc(s.name)} (${esc(siteById(s.siteId)?.name||'')}, ${hrs(seriesWeekHours(s)*52/12)} h/mån)`).join(', ')}</div>`:''}
     ${UI.formErr?`<div class="issues-box"><div class="row err">${esc(UI.formErr)}</div></div>`:''}
-    ${id ? confirmBox('delEmp:'+id, `Ta bort <b>${esc(e.name)}</b>? Ordinarie pass och tilldelade pass blir vakanta.`, 'Ta bort', 'delEmp', `data-id="${id}"`) : ''}
+    ${id ? confirmBox('delEmp:'+id, `Ta bort <b>${esc(x.name)}</b>? Ordinarie pass och tilldelade pass blir vakanta.`, 'Ta bort', 'delEmp', `data-id="${id}"`) : ''}
     </div>
     <div class="dlg-f">${id?`<button class="btn danger" data-act="askDelEmp" data-id="${id}">Ta bort</button>`:''}<button class="btn" data-act="closeModal">Avbryt</button><button class="btn primary" data-act="saveEmp" data-id="${id||''}">Spara</button></div>`;
   });
+}
+function syncEmp(){
+  const x = UI.empDraft; if (!x) return; const v = id => { const el = document.getElementById(id); return el ? el.value : undefined; };
+  x.name = v('eName') ?? x.name; x.role = v('eRole') ?? x.role; x.form = v('eForm') ?? x.form; x.typ = v('eTyp') ?? x.typ;
+  const m = v('eMatt'); if (m !== undefined) x.matt = +m || 0;
+  const tre = document.getElementById('eTre'); x.treskift = x.typ==='behov' ? false : (tre ? tre.checked : x.treskift);
+  x.lg = v('eLg') ?? x.lg; x.start = v('eStart') ?? x.start; x.end = v('eEnd') ?? x.end; x.phone = v('ePhone') ?? x.phone; x.email = v('eEmail') ?? x.email;
+  x.certs = Object.keys(CERTS).filter(k => document.getElementById('ec_'+k)?.checked);
+  if (x.typ==='heltid' || x.typ==='behov') x.matt = 0;
 }
 
 /* =========================================================
@@ -1242,7 +1447,7 @@ const ACT = {
   newSeries: () => { UI.formErr = null; seriesDialog(null); },
   editSeries: d => { UI.formErr = null; seriesDialog(d.id); },
   newSingle: () => { UI.formErr = null; singleDialog(); },
-  preset: d => { syncDraft(); const P = {'223n':{from:'18:00',to:'06:00',cycle:2,days:[[0,1,4,5,6],[2,3]],breakMin:0}, '223d':{from:'06:00',to:'18:00',cycle:2,days:[[0,1,4,5,6],[2,3]],breakMin:0}, 'kontor':{from:'08:00',to:'17:00',cycle:1,days:[[0,1,2,3,4]],breakMin:60}}[d.p]; Object.assign(UI.draft, JSON.parse(JSON.stringify(P))); refreshModal(); },
+  preset: d => { syncDraft(); const P = {'223n':{from:'18:00',to:'06:00',cycle:2,days:[[0,1,4,5,6],[2,3]],breakMin:60}, '223d':{from:'06:00',to:'18:00',cycle:2,days:[[0,1,4,5,6],[2,3]],breakMin:60}, 'kontor':{from:'08:00',to:'17:00',cycle:1,days:[[0,1,2,3,4]],breakMin:60,skipHol:true}}[d.p]; Object.assign(UI.draft, JSON.parse(JSON.stringify(P))); refreshModal(); },
   parsePattern: () => { const txt = document.getElementById('ptxt').value; syncDraft(); const p = parsePattern(txt); if (!p){ UI.formErr = 'Hittade ingen tid. Skriv t.ex. "18-06 mån-tis fre-sön | ons-tors".'; } else { UI.formErr = null; Object.assign(UI.draft, p); } refreshModal(); },
   saveSeries: () => {
     syncDraft(); const d = UI.draft;
@@ -1263,24 +1468,24 @@ const ACT = {
     const name = v('xName').trim(), date = v('xDate'), mode = v('xMode'), n = Math.min(20, Math.max(1, +v('xCount')||1));
     if (!name) { UI.formErr = 'Ge passet ett namn.'; return refreshModal(); }
     if (!date) { UI.formErr = 'Välj datum.'; return refreshModal(); }
-    for (let i=0;i<n;i++) D.singles.push({id:uid('x'), date, from:v('xFrom'), to:v('xTo'), siteId:v('xSite'), name, personId: (mode==='open'||mode==='vacant') ? null : (i===0?mode:null), open: mode==='open' || (mode!=='vacant' && i>0), cancelled:false, breakMin:+v('xBreak')||0, requires:v('xReq')});
+    for (let i=0;i<n;i++) D.singles.push({id:uid('x'), date, from:v('xFrom'), to:v('xTo'), siteId:v('xSite'), name, personId: (mode==='open'||mode==='vacant') ? null : (i===0?mode:null), open: mode==='open' || (mode!=='vacant' && i>0), cancelled:false, breakMin:+v('xBreak')||0, requires:v('xReq'), lg:v('xLg'), mealPaid:document.getElementById('xMeal').checked, dog:document.getElementById('xDog').checked});
     save(); UI.formErr = null; closeModal(); render(); toast(n>1 ? `${n} extrapass skapade` : 'Extrapass skapat');
   },
   editEmp: d => { UI.formErr = null; UI.confirm = null; empDialog(d.id); },
   saveEmp: d => {
-    const v = id => document.getElementById(id).value;
-    const form = v('eForm'), F = FORMS[form];
-    const e = d.id ? empById(d.id) : {id:uid('e')};
-    const rec = {name:v('eName').trim(), role:v('eRole'), form, grad: F.pay==='hour' ? 0 : Math.min(100, Math.max(0, +v('eGrad')||0)), lg:v('eLg'), certs:Object.keys(CERTS).filter(k=>document.getElementById('ec_'+k).checked), start:v('eStart'), end:v('eEnd'), phone:v('ePhone').trim(), email:v('eEmail').trim()};
+    syncEmp(); const x = UI.empDraft, S = D.settings, F = FORMS[x.form];
+    const minH = x.treskift ? S.halvtidMinTreskift : S.halvtidMin, full = x.treskift ? S.treskiftMatt : S.heltidMatt;
     let err = null;
-    if (!rec.name) err = 'Ange namn.';
-    else if (F.needsEnd && !rec.end) err = `${F.name} kräver ett slutdatum.`;
-    else if (rec.end && rec.start && rec.end < rec.start) err = 'Slutdatum ligger före startdatum.';
-    else if (form==='prov' && rec.start && rec.end){ const s = parseISO(rec.start); const max = addDays(new Date(s.getFullYear(), s.getMonth()+6, s.getDate()), -1); if (parseISO(rec.end) > max) err = `Provanställning får vara högst 6 månader (senast ${iso(max)}).`; }
-    else if (F.pay==='month' && rec.grad <= 0) err = 'Månadsavlönad anställning behöver en sysselsättningsgrad över 0 %.';
-    if (!rec.role || (d.id===UI.user && rec.role!=='arbetsledare' && !D.employees.some(x=>x.id!==d.id && x.role==='arbetsledare'))) err = err || 'Det måste finnas minst en arbetsledare.';
+    if (!x.name.trim()) err = 'Ange namn.';
+    else if (F.needsEnd && !x.end) err = `${F.name} kräver ett slutdatum.`;
+    else if (x.end && x.start && x.end < x.start) err = 'Slutdatum ligger före startdatum.';
+    else if (x.form==='prov' && x.start && x.end){ const st = parseISO(x.start); const max = addDays(new Date(st.getFullYear(), st.getMonth()+6, st.getDate()), -1); if (parseISO(x.end) > max) err = `Provanställning får vara högst 6 månader (senast ${iso(max)}).`; }
+    if (!err && x.typ==='halvtid' && (x.matt < minH || x.matt >= full)) err = `Halvtid kräver ett arbetstidsmått på minst ${num(minH)} h och under ${num(full)} h per månad (§ 1 mom 4).`;
+    if (!err && x.typ==='deltid' && (x.matt <= 0 || x.matt >= minH)) err = `Deltid kräver ett arbetstidsmått under ${num(minH)} h per månad (§ 1 mom 4). Välj halvtid för fler timmar.`;
+    if (!err && d.id===UI.user && x.role!=='arbetsledare' && !D.employees.some(o=>o.id!==d.id && o.role==='arbetsledare')) err = 'Det måste finnas minst en arbetsledare.';
     if (err){ UI.formErr = err; return refreshModal(); }
-    Object.assign(e, rec); if (!d.id) D.employees.push(e);
+    x.name = x.name.trim(); x.phone = (x.phone||'').trim(); x.email = (x.email||'').trim();
+    if (d.id){ Object.assign(empById(d.id), x); } else { x.id = uid('e'); D.employees.push(x); }
     save(); UI.formErr = null; closeModal(); render(); toast('Personal sparad');
   },
   askDelEmp: d => { if (D.employees.length<=1) return; UI.confirm = 'delEmp:'+d.id; refreshModal(); },
@@ -1299,8 +1504,14 @@ const ACT = {
   book: d => { const o = getOcc(d.id); if (!o || o.status!=='open'){ toast('Passet är inte längre ledigt.'); UI.bookCheck = null; return render(); }
     const is = simulate(o, me().id); if (is.some(i=>i.level==='error')) { UI.bookCheck = {id:d.id, issues:is}; return render(); }
     setOcc(o, {personId: me().id, open:false}); UI.bookCheck = null; render(); toast(`Du har bokat ${o.name} ${fmtD(o.start)}`); },
-  addLg: () => { const n = D.settings.lonegrupper.length+1; let id = 'G'+n; while (D.settings.lonegrupper.some(g=>g.id===id)) id += 'b'; D.settings.lonegrupper.push({id, name:'Ny lönegrupp', salary:28000}); save(); render(); },
-  delLg: d => { D.settings.lonegrupper.splice(+d.i,1); save(); render(); },
+  pickTariff: d => { UI.tariff = d.f; UI.confirm = null; render(); },
+  addTariff: () => {
+    const list = [...D.settings.tariffs].sort((a,b)=>a.from.localeCompare(b.from)); const last = list[list.length-1];
+    let y = Math.max(+last.from.slice(0,4)+1, today0().getFullYear()); let from = `${y}-04-01`; while (D.settings.tariffs.some(t=>t.from===from)) from = `${++y}-04-01`;
+    const t = JSON.parse(JSON.stringify(last)); t.from = from; t.label = tariffLabel(from); D.settings.tariffs.push(t); UI.tariff = from; save(); render(); toast('Ny avtalsperiod skapad som kopia av den senaste. Fyll i de nya beloppen.');
+  },
+  askDelTariff: () => { UI.confirm = 'delTariff'; render(); },
+  delTariff: d => { D.settings.tariffs.splice(+d.i,1); UI.confirm = null; UI.tariff = null; save(); render(); toast('Avtalsperioden är borttagen'); },
   addSite: () => { D.sites.push({id:uid('s'), name:'Nytt objekt', address:''}); save(); render(); },
   delSite: d => { D.sites.splice(+d.i,1); save(); render(); },
   backup: () => offerFile(`vaktplan-backup-${iso(new Date())}.json`, new Blob([JSON.stringify(D,null,2)], {type:'application/json'})),
@@ -1312,26 +1523,19 @@ const CHG = {
   cand: el => { UI.selCand = el.value || null; UI.pendingForce = null; refreshModal(); },
   draft: () => { syncDraft(); refreshModal(); },
   draftDay: el => { syncDraft(); const w = +el.dataset.w, i = +el.dataset.d; const set = new Set(UI.draft.days[w]||[]); el.checked ? set.add(i) : set.delete(i); UI.draft.days[w] = [...set].sort((a,b)=>a-b); refreshModal(); },
-  empForm: el => {
-    // behåll inmatade värden när formen byts
-    const keep = ['eName','eRole','eGrad','eLg','eStart','eEnd','ePhone','eEmail'].map(id => [id, document.getElementById(id).value]);
-    const certs = Object.keys(CERTS).map(k => [k, document.getElementById('ec_'+k).checked]);
-    UI.empForm = el.value; refreshModal();
-    keep.forEach(([id,v]) => { const x = document.getElementById(id); if (x && !(id==='eGrad' && FORMS[el.value].pay==='hour')) x.value = v; });
-    if (FORMS[el.value].pay==='month' && +document.getElementById('eGrad').value===0) document.getElementById('eGrad').value = 100;
-    certs.forEach(([k,v]) => { document.getElementById('ec_'+k).checked = v; });
-  },
+  empDraft: () => { syncEmp(); refreshModal(); },
   payMonth: el => { if (el.value){ UI.payMonth = el.value; render(); } },
   myMonth: el => { if (el.value){ UI.myMonth = el.value; render(); } },
   setting: el => {
     const path = el.dataset.path.split('.'); let o = D.settings; for (let i=0;i<path.length-1;i++) o = o[path[i]];
-    const k = path[path.length-1]; o[k] = el.type==='number' ? (+el.value||0) : el.value; splitCache.clear(); save(); render();
+    const k = path[path.length-1]; o[k] = el.type==='number' ? (+el.value||0) : el.value; save(); render();
   },
-  lg: el => { const g = D.settings.lonegrupper[+el.dataset.i]; g[el.dataset.f] = el.dataset.f==='salary' ? (+el.value||0) : el.value; save(); render(); },
+  tariff: el => { const t = D.settings.tariffs[+el.dataset.i]; const f = el.dataset.f, k = el.dataset.k, v = +el.value || 0; if (k) t[f][k] = v; else t[f] = v; save(); render(); },
+  tariffFrom: el => { const t = D.settings.tariffs[+el.dataset.i]; if (!el.value) return; if (D.settings.tariffs.some(o=>o!==t && o.from===el.value)){ toast('Det finns redan en period med det datumet.'); return render(); } t.from = el.value; t.label = tariffLabel(el.value); UI.tariff = el.value; save(); render(); },
   site: el => { D.sites[+el.dataset.i][el.dataset.f] = el.value; save(); render(); },
   import: el => {
     const f = el.files && el.files[0]; if (!f) return; const r = new FileReader();
-    r.onload = () => { try { const x = JSON.parse(r.result); if (!x.employees || !x.series || !x.settings) throw 0; x.singles = x.singles||[]; x.overrides = x.overrides||{}; x.sites = x.sites||[]; D = x; save(); UI.user = D.employees.find(e=>e.role==='arbetsledare')?.id || D.employees[0].id; render(); toast('Säkerhetskopian är importerad'); } catch(e){ toast('Filen är ingen giltig säkerhetskopia från Vaktplan.'); } };
+    r.onload = () => { try { const x = JSON.parse(r.result); if (!x.employees || !x.series || !x.settings) throw 0; x.singles = x.singles||[]; x.overrides = x.overrides||{}; x.sites = x.sites||[]; if ((x.version||1) < 2) migrate(x); D = x; save(); UI.user = D.employees.find(e=>e.role==='arbetsledare')?.id || D.employees[0].id; render(); toast('Säkerhetskopian är importerad'); } catch(e){ toast('Filen är ingen giltig säkerhetskopia från Vaktplan.'); } };
     r.readAsText(f);
   },
 };
